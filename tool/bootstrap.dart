@@ -113,10 +113,10 @@ void _patchGradleKts(File f) {
 
   const loader = '''
 // inkwell-signing: release signing comes from android/key.properties (written by CI)
-val keystoreProperties = java.util.Properties()
+val keystoreProperties = Properties()
 val keystorePropertiesFile = rootProject.file("key.properties")
 if (keystorePropertiesFile.exists()) {
-    keystoreProperties.load(java.io.FileInputStream(keystorePropertiesFile))
+    keystoreProperties.load(FileInputStream(keystorePropertiesFile))
 }
 
 ''';
@@ -141,6 +141,9 @@ if (keystorePropertiesFile.exists()) {
     exit(1);
   }
   s = s.replaceRange(first.start, first.start, loader);
+  // `java.util...` does not resolve in Gradle Kotlin scripts (`java` is the
+  // Java plugin extension there), so use imports, which must come first.
+  s = 'import java.io.FileInputStream\nimport java.util.Properties\n\n$s';
 
   final second = androidBlock.firstMatch(s)!;
   final lineEnd = s.indexOf('\n', second.end) + 1;

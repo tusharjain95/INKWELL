@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:cryptography/cryptography.dart';
 import 'package:flutter/foundation.dart';
@@ -59,8 +58,8 @@ class SyncReport {
 ///
 /// Repository layout (everything is AES-256-GCM encrypted except meta.json):
 ///   inkwell/meta.json              salt + passphrase check
-///   inkwell/notes/<id>.enc         one file per note
-///   inkwell/blobs/<keyed-hash>.enc one file per attachment
+///   inkwell/notes/`<id>`.enc         one file per note
+///   inkwell/blobs/`<keyed-hash>`.enc one file per attachment
 class SyncService extends ChangeNotifier {
   SyncService(this.store, this.settings, {this.guard});
 

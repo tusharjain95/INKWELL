@@ -75,7 +75,7 @@ RegExp _re(String p) => RegExp(p, caseSensitive: false);
 
 final RegExp _reTaskPrefix = _re(
     r"^\s*(?:remind me(?: to| that| about)?|reminder:?|don'?t forget to|"
-    r"to-?do:?|task:?|add (?:a )?task(?: to)?:?|i need to|i have to|i must)\s+");
+    r'to-?do:?|task:?|add (?:a )?task(?: to)?:?|i need to|i have to|i must)\s+');
 final RegExp _reNotePrefix = _re(
     r'^\s*(?:note(?: to self)?\s*:|note to self\s+|note that\s+|jot down\s+|write down\s+)');
 

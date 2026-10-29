@@ -304,7 +304,8 @@ class _SettingsPageState extends State<SettingsPage> {
                 ),
                 Consumer<VoiceInput>(
                   builder: (context, voice, _) => DropdownButtonFormField<String>(
-                    value: voice.locales.any((l) => l.localeId == settings.speechLocale)
+                    key: ValueKey('${settings.speechLocale}/${voice.locales.length}'),
+                    initialValue: voice.locales.any((l) => l.localeId == settings.speechLocale)
                         ? settings.speechLocale
                         : '',
                     isExpanded: true,

@@ -95,8 +95,9 @@ class _QuickAddSheetState extends State<QuickAddSheet> {
   Future<void> _save() async {
     final e = _parse();
     if (e.isEmpty) return;
+    final store = context.read<NoteStore>();
     await _voice.stop();
-    final n = await context.read<NoteStore>().createFromEntry(e);
+    final n = await store.createFromEntry(e);
     if (mounted) Navigator.pop(context, n);
   }
 

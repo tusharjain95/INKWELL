@@ -82,10 +82,10 @@ class VoiceInput extends ChangeNotifier {
           if (r.finalResult) _finish();
           notifyListeners();
         },
-        localeId: settings.speechLocale.isEmpty ? null : settings.speechLocale,
-        listenFor: const Duration(minutes: 2),
-        pauseFor: const Duration(seconds: 4),
         listenOptions: SpeechListenOptions(
+          localeId: settings.speechLocale.isEmpty ? null : settings.speechLocale,
+          listenFor: const Duration(minutes: 2),
+          pauseFor: const Duration(seconds: 4),
           onDevice: settings.onDeviceSpeech,
           partialResults: true,
           listenMode: ListenMode.dictation,

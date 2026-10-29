@@ -222,6 +222,7 @@ class _EditorPaneState extends State<EditorPane> with WidgetsBindingObserver {
 
   Future<void> _addFiles() async {
     final messenger = ScaffoldMessenger.of(context);
+    final level = context.read<AppSettings>().imageCompression;
     final res = await FilePicker.platform.pickFiles(allowMultiple: true);
     if (res == null) return;
     await _flush();
@@ -230,7 +231,6 @@ class _EditorPaneState extends State<EditorPane> with WidgetsBindingObserver {
       final path = f.path;
       if (path == null) continue;
       try {
-        final level = context.read<AppSettings>().imageCompression;
         final r = await _store.importAttachment(File(path), f.name,
             level: level);
         added.add(r.ref);
@@ -461,8 +461,11 @@ class _EditorPaneState extends State<EditorPane> with WidgetsBindingObserver {
             showSearchButton: false,
             showColorButton: false,
             showBackgroundColorButton: false,
+            // ignore: experimental_member_use
             showClipboardCut: false,
+            // ignore: experimental_member_use
             showClipboardCopy: false,
+            // ignore: experimental_member_use
             showClipboardPaste: false,
           ),
         ),

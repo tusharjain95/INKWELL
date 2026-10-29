@@ -1,0 +1,46 @@
+name: inkwell
+description: Fast, private notes that sync through your own GitHub repository.
+publish_to: none
+version: 0.1.0+1
+
+environment:
+  sdk: ^3.5.0
+  flutter: ">=3.24.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+
+  # state + utilities
+  provider: ^6.1.2
+  path: ^1.9.0
+  path_provider: ^2.1.4
+  mime: ^2.0.0
+  package_info_plus: ^8.0.2
+  shared_preferences: ^2.3.2
+  flutter_secure_storage: ^9.2.2
+
+  # networking + crypto (pure Dart, works on Android and Windows)
+  http: ^1.2.2
+  cryptography: ^2.7.0
+
+  # image compression, background sync, voice input
+  image: ^4.2.0
+  workmanager: ^0.9.0
+  speech_to_text: ^7.0.0
+
+  # notes UI
+  flutter_quill: ^11.0.0
+  file_picker: ^8.1.2
+  open_filex: ^4.5.0
+  dynamic_color: ^1.7.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+
+flutter:
+  uses-material-design: true

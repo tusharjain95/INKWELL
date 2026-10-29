@@ -1,0 +1,142 @@
+name: Release
+
+# Push a tag like v1.2.0 to build Windows and Android together and publish
+# them as ONE GitHub Release. Running it by hand (Actions -> Run workflow)
+# does a dry run: builds and uploads artifacts, publishes nothing.
+on:
+  push:
+    tags: ['v*.*.*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  meta:
+    runs-on: ubuntu-latest
+    outputs:
+      name: ${{ steps.v.outputs.name }}
+      code: ${{ steps.v.outputs.code }}
+    steps:
+      - id: v
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then NAME="${GITHUB_REF_NAME#v}"; else NAME="0.0.0"; fi
+          CORE="${NAME%%[-+]*}"
+          IFS='.' read -r MAJ MIN PAT <<< "$CORE"
+          CODE=$(( ${MAJ:-0} * 1000000 + ${MIN:-0} * 1000 + ${PAT:-0} ))
+          if [[ "$CODE" -lt 1 ]]; then CODE="$GITHUB_RUN_NUMBER"; fi
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+          echo "code=$CODE" >> "$GITHUB_OUTPUT"
+          echo "Building version $NAME (build $CODE)"
+
+  android:
+    needs: meta
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Generate and patch the Android project
+        run: dart run tool/bootstrap.dart android
+
+      - name: Restore signing key
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          STORE_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_PASS: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          if [ -z "$KEYSTORE_B64" ] || [ -z "$STORE_PASS" ] || [ -z "$KEY_PASS" ] || [ -z "$KEY_ALIAS" ]; then
+            echo "::error::Missing Android signing secrets. See README 'Release signing'. Updates only work when every release is signed with the same key."
+            exit 1
+          fi
+          echo "$KEYSTORE_B64" | base64 -d > android/app/upload-keystore.jks
+          {
+            echo "storePassword=$STORE_PASS"
+            echo "keyPassword=$KEY_PASS"
+            echo "keyAlias=$KEY_ALIAS"
+            echo "storeFile=upload-keystore.jks"
+          } > android/key.properties
+
+      - run: flutter pub get
+
+      - name: Build signed APK
+        run: >
+          flutter build apk --release
+          --build-name=${{ needs.meta.outputs.name }}
+          --build-number=${{ needs.meta.outputs.code }}
+          --dart-define=UPDATE_REPO=${{ github.repository }}
+
+      - name: Collect
+        run: |
+          mkdir -p dist
+          cp build/app/outputs/flutter-apk/app-release.apk dist/inkwell-android.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android
+          path: dist/inkwell-android.apk
+
+  windows:
+    needs: meta
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Generate and patch the Windows project
+        run: dart run tool/bootstrap.dart windows
+
+      - run: flutter pub get
+
+      - name: Build Windows app
+        run: >
+          flutter build windows --release
+          --build-name=${{ needs.meta.outputs.name }}
+          --build-number=${{ needs.meta.outputs.code }}
+          --dart-define=UPDATE_REPO=${{ github.repository }}
+
+      - name: Build installer and portable zip
+        shell: pwsh
+        run: |
+          choco install innosetup -y --no-progress
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DAppVersion=${{ needs.meta.outputs.name }}" installer\inkwell.iss
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed" }
+          Compress-Archive -Path build\windows\x64\runner\Release\* -DestinationPath dist\inkwell-windows-portable.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: |
+            dist/inkwell-windows-setup.exe
+            dist/inkwell-windows-portable.zip
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [android, windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, '-') }}

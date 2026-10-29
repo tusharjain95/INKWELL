@@ -94,6 +94,9 @@ void _patchAndroid() {
     stdout.writeln('Patched AndroidManifest.xml for voice input');
   }
 
+  // --- gradle: compile every plugin against a recent Android API ---------------
+  _patchPluginCompileSdk();
+
   // --- gradle: release signing + minSdk ---------------------------------------
   final kts = File('android/app/build.gradle.kts');
   if (kts.existsSync()) {
@@ -105,6 +108,46 @@ void _patchAndroid() {
     stderr.writeln('error: no android/app/build.gradle(.kts) found');
     exit(1);
   }
+}
+
+/// Some plugins (file_picker, open_filex, ...) still compile against an old
+/// API level, but androidx.lifecycle now requires 36+. Raise it for all
+/// Android library subprojects from the root build script.
+void _patchPluginCompileSdk() {
+  final f = File('android/build.gradle.kts');
+  if (!f.existsSync()) {
+    stderr.writeln('warning: android/build.gradle.kts not found; if the build '
+        'complains about compileSdk, raise it for plugins manually.');
+    return;
+  }
+  var s = f.readAsStringSync();
+  if (s.contains('inkwell-compilesdk')) return;
+  s += '''
+
+// inkwell-compilesdk: plugins compiled against old APIs fail AAR metadata checks
+subprojects {
+    val raise = {
+        val ext = extensions.findByName("android")
+        if (ext != null) {
+            try {
+                val get = ext.javaClass.getMethod("getCompileSdk")
+                val cur = get.invoke(ext) as Int?
+                if (cur == null || cur < 36) {
+                    ext.javaClass.getMethod("setCompileSdk", Int::class.javaObjectType)
+                        .invoke(ext, 36)
+                }
+            } catch (e: Exception) {
+                logger.warn("inkwell: could not raise compileSdk for " + name + ": " + e)
+            }
+        }
+    }
+    plugins.withId("com.android.library") {
+        if (state.executed) raise() else afterEvaluate { raise() }
+    }
+}
+''';
+  f.writeAsStringSync(s);
+  stdout.writeln('Patched android/build.gradle.kts (compileSdk 36 for plugins)');
 }
 
 void _patchGradleKts(File f) {

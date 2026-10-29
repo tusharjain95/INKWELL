@@ -75,7 +75,14 @@ class _NotesPageState extends State<NotesPage> {
 
   Future<void> _newNote() async {
     final wide = MediaQuery.sizeOf(context).width >= _kWide;
-    final n = await context.read<NoteStore>().create();
+    // Started from the Tasks / Today view: make a task (due today in Today).
+    final today = DateTime.now();
+    final n = await context.read<NoteStore>().create(
+          task: _view != NoteView.all,
+          due: _view == NoteView.today
+              ? DateTime(today.year, today.month, today.day)
+              : null,
+        );
     if (!mounted) return;
     if (_trash) setState(() => _trash = false);
     _open(n.id, wide);
@@ -182,7 +189,7 @@ class _NotesPageState extends State<NotesPage> {
                   heroTag: 'new-note',
                   onPressed: _newNote,
                   icon: const Icon(Icons.edit_outlined),
-                  label: const Text('New note'),
+                  label: Text(_view == NoteView.all ? 'New note' : 'New task'),
                 ),
               ],
             ),

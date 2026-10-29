@@ -223,9 +223,15 @@ class NoteStore extends ChangeNotifier {
 
   // ----------------------------------------------------------------- writes
 
-  Future<Note> create() async {
+  Future<Note> create({bool task = false, DateTime? due}) async {
     final now = DateTime.now().toUtc();
-    final n = Note(id: newId(), createdAt: now, updatedAt: now);
+    final n = Note(
+      id: newId(),
+      createdAt: now,
+      updatedAt: now,
+      isTask: task,
+      due: task ? due : null,
+    );
     await save(n);
     return n;
   }

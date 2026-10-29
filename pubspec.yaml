@@ -4,8 +4,8 @@ publish_to: none
 version: 0.1.0+1
 
 environment:
-  sdk: ^3.5.0
-  flutter: ">=3.24.0"
+  sdk: ^3.10.0
+  flutter: ">=3.38.0"
 
 dependencies:
   flutter:
@@ -28,7 +28,7 @@ dependencies:
 
   # image compression, background sync, voice input
   image: ^4.2.0
-  workmanager: ^0.9.0
+  workmanager: ^0.10.10
   speech_to_text: ^7.0.0
 
   # notes UI

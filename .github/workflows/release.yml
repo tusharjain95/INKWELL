@@ -47,7 +47,9 @@ jobs:
           cache: true
 
       - name: Generate and patch the Android project
-        run: dart run tool/bootstrap.dart android
+        run: |
+          dart run tool/bootstrap.dart android
+          echo '--- init script ---'; cat ~/.gradle/init.d/inkwell-compilesdk.gradle
 
       - name: Restore signing key
         env:

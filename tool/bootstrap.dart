@@ -111,43 +111,33 @@ void _patchAndroid() {
 }
 
 /// Some plugins (file_picker, open_filex, ...) still compile against an old
-/// API level, but androidx.lifecycle now requires 36+. Raise it for all
-/// Android library subprojects from the root build script.
+/// API level, but androidx.lifecycle now requires 36+. Raise it for every
+/// Android library from a Gradle init script in the user's Gradle home. An
+/// init script is plain Groovy, so it does not depend on which Android Gradle
+/// Plugin classes the project build scripts can see.
 void _patchPluginCompileSdk() {
-  final f = File('android/build.gradle.kts');
-  if (!f.existsSync()) {
-    stderr.writeln('warning: android/build.gradle.kts not found; if the build '
-        'complains about compileSdk, raise it for plugins manually.');
-    return;
-  }
-  var s = f.readAsStringSync();
-  if (s.contains('inkwell-compilesdk')) return;
-  s += '''
-
-// inkwell-compilesdk: plugins compiled against old APIs fail AAR metadata checks
-subprojects {
-    val raise = {
-        val ext = extensions.findByName("android")
-        if (ext != null) {
-            try {
-                val get = ext.javaClass.getMethod("getCompileSdk")
-                val cur = get.invoke(ext) as Int?
-                if (cur == null || cur < 36) {
-                    ext.javaClass.getMethod("setCompileSdk", Int::class.javaObjectType)
-                        .invoke(ext, 36)
-                }
-            } catch (e: Exception) {
-                logger.warn("inkwell: could not raise compileSdk for " + name + ": " + e)
+  final home = Platform.environment['GRADLE_USER_HOME'] ??
+      '${Platform.environment['HOME'] ?? Platform.environment['USERPROFILE']}'
+          '${Platform.pathSeparator}.gradle';
+  final dir = Directory('$home${Platform.pathSeparator}init.d')
+    ..createSync(recursive: true);
+  final f = File('${dir.path}${Platform.pathSeparator}inkwell-compilesdk.gradle');
+  f.writeAsStringSync(r'''
+// inkwell-compilesdk: plugins compiled against old APIs fail the AAR metadata check
+gradle.beforeProject { p ->
+    p.afterEvaluate {
+        if (p.plugins.hasPlugin('com.android.library')) {
+            def ext = p.extensions.findByName('android')
+            def cur = ext.hasProperty('compileSdk') ? ext.compileSdk : null
+            if (cur == null || cur < 36) {
+                ext.compileSdk = 36
+                println "inkwell: compileSdk 36 for ${p.name} (was ${cur})"
             }
         }
     }
-    plugins.withId("com.android.library") {
-        if (state.executed) raise() else afterEvaluate { raise() }
-    }
 }
-''';
-  f.writeAsStringSync(s);
-  stdout.writeln('Patched android/build.gradle.kts (compileSdk 36 for plugins)');
+''');
+  stdout.writeln('Wrote ${f.path} (compileSdk 36 for plugins)');
 }
 
 void _patchGradleKts(File f) {

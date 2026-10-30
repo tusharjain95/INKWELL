@@ -114,7 +114,9 @@ class NoteStore extends ChangeNotifier {
   }
 
   Future<void> _load() async {
-    _notes.clear();
+    // Read everything first, then swap in one step: clearing up front would
+    // leave a moment with no notes, and open editors would be torn down.
+    final loaded = <String, Note>{};
     await _notesDir.create(recursive: true);
     await _blobsDir.create(recursive: true);
     await for (final e in _notesDir.list()) {
@@ -122,11 +124,22 @@ class NoteStore extends ChangeNotifier {
       try {
         final j = jsonDecode(await e.readAsString()) as Map<String, dynamic>;
         final n = Note.fromJson(j);
-        _notes[n.id] = n;
+        loaded[n.id] = n;
       } catch (_) {
         // A corrupt file must never stop the app from opening.
       }
     }
+    // Disk wins (a background worker may have changed it), except for a note
+    // saved in memory a moment ago whose file was not written yet.
+    for (final e in _notes.entries) {
+      final onDisk = loaded[e.key];
+      if (onDisk == null || e.value.updatedAt.isAfter(onDisk.updatedAt)) {
+        loaded[e.key] = e.value;
+      }
+    }
+    _notes
+      ..clear()
+      ..addAll(loaded);
     if (await _stateFile.exists()) {
       try {
         state = SyncState.fromJson(

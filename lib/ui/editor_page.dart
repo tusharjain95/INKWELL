@@ -65,6 +65,9 @@ class _EditorPaneState extends State<EditorPane> with WidgetsBindingObserver {
   bool _pending = false;
   late DateTime _known;
   VoiceInput? _voice;
+  final FocusNode _titleFocus = FocusNode();
+  final FocusNode _bodyFocus = FocusNode();
+  Note? _last; // shown while the store briefly has no copy (e.g. a reload)
   int _dictAt = 0;
   int _dictLen = 0;
 
@@ -116,13 +119,38 @@ class _EditorPaneState extends State<EditorPane> with WidgetsBindingObserver {
     final n = _store.byId(widget.noteId);
     if (n == null || !n.updatedAt.isAfter(_known)) return;
     _known = n.updatedAt;
+
+    // The note changed underneath us (a sync brought a newer version). Swap
+    // the content in, but keep the cursor and keyboard where they were, or
+    // typing would suddenly continue in another field.
+    final bodyHadFocus = _bodyFocus.hasFocus;
+    final titleHadFocus = _titleFocus.hasFocus;
+    final oldSel = _quill.selection;
+    final titleSel = _title.selection;
+
     _sub?.cancel();
     final old = _quill;
     WidgetsBinding.instance.addPostFrameCallback((_) => old.dispose());
-    _title.text = n.title;
+    _title.value = TextEditingValue(
+      text: n.title,
+      selection: titleSel.isValid
+          ? TextSelection.collapsed(
+              offset: titleSel.baseOffset.clamp(0, n.title.length))
+          : TextSelection.collapsed(offset: n.title.length),
+    );
     _quill = _buildController(n.body);
+    final max = _quill.document.length - 1;
+    final off = oldSel.isValid ? oldSel.baseOffset.clamp(0, max) : max;
+    _quill.updateSelection(
+        TextSelection.collapsed(offset: off), ChangeSource.local);
     _bind();
     setState(() {});
+    if (bodyHadFocus || titleHadFocus) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        (titleHadFocus ? _titleFocus : _bodyFocus).requestFocus();
+      });
+    }
   }
 
   void _schedule() {
@@ -171,6 +199,8 @@ class _EditorPaneState extends State<EditorPane> with WidgetsBindingObserver {
     }());
     _quill.dispose();
     _title.dispose();
+    _titleFocus.dispose();
+    _bodyFocus.dispose();
     super.dispose();
   }
 
@@ -336,7 +366,9 @@ class _EditorPaneState extends State<EditorPane> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
-    final note = context.watch<NoteStore>().byId(widget.noteId);
+    final fresh = context.watch<NoteStore>().byId(widget.noteId);
+    if (fresh != null) _last = fresh;
+    final note = fresh ?? _last;
     if (note == null) return const SizedBox.shrink();
     final cs = Theme.of(context).colorScheme;
     final text = Theme.of(context).textTheme;
@@ -399,6 +431,7 @@ class _EditorPaneState extends State<EditorPane> with WidgetsBindingObserver {
           padding: const EdgeInsets.symmetric(horizontal: 20),
           child: TextField(
             controller: _title,
+            focusNode: _titleFocus,
             onChanged: (_) => _schedule(),
             textInputAction: TextInputAction.next,
             style: text.headlineSmall?.copyWith(fontWeight: FontWeight.w700),
@@ -475,6 +508,7 @@ class _EditorPaneState extends State<EditorPane> with WidgetsBindingObserver {
             child: QuillEditor.basic(
               key: ObjectKey(_quill),
               controller: _quill,
+              focusNode: _bodyFocus,
               config: QuillEditorConfig(
                 placeholder: 'Start writing…',
                 padding: const EdgeInsets.fromLTRB(12, 8, 12, 24),

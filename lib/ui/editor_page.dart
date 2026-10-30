@@ -13,6 +13,7 @@ import '../core/speech.dart';
 import '../core/store.dart';
 import 'attachment_widgets.dart';
 import 'format.dart';
+import 'numbered_input.dart';
 import 'task_bar.dart';
 
 /// Full-screen editor used on narrow (phone) layouts.
@@ -109,7 +110,47 @@ class _EditorPaneState extends State<EditorPane> with WidgetsBindingObserver {
   }
 
   void _bind() {
-    _sub = _quill.document.changes.listen((_) => _schedule());
+    _sub = _quill.document.changes.listen((event) {
+      _schedule();
+      if (event.source == ChangeSource.local &&
+          event.change.operations.any((o) => o.isInsert && o.data == ' ')) {
+        // Edit the document after this change has been fully applied.
+        scheduleMicrotask(_autoNumber);
+      }
+    });
+  }
+
+  bool _autoNumbering = false;
+
+  /// Typing "1." (or "1)") and a space at the start of a line turns the line
+  /// into a numbered list item. Enter then continues the list and Enter on an
+  /// empty item ends it, which the editor already does for lists.
+  void _autoNumber() {
+    if (_autoNumbering || !mounted) return;
+    final sel = _quill.selection;
+    if (!sel.isValid || !sel.isCollapsed) return;
+    final cursor = sel.baseOffset;
+    if (cursor < 3) return;
+    final text = _quill.document.toPlainText();
+    if (cursor > text.length) return;
+    final lineStart = cursor - 2 < 0 ? 0 : text.lastIndexOf('\n', cursor - 2) + 1;
+    final line = text.substring(lineStart, cursor);
+    if (!kNumberMarkerLine.hasMatch(line)) return;
+    // Already in a list or other block (list, quote, code)? Leave it alone.
+    final style = _quill.document.collectStyle(lineStart, 0);
+    if (style.containsKey(Attribute.list.key) ||
+        style.containsKey(Attribute.blockQuote.key) ||
+        style.containsKey(Attribute.codeBlock.key)) {
+      return;
+    }
+    _autoNumbering = true;
+    try {
+      _quill.replaceText(lineStart, line.length, '',
+          TextSelection.collapsed(offset: lineStart));
+      _quill.formatSelection(Attribute.ol);
+    } finally {
+      _autoNumbering = false;
+    }
   }
 
   /// A sync pulled a newer version of this note while it was open and the

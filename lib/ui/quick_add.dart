@@ -7,6 +7,7 @@ import '../core/settings.dart';
 import '../core/speech.dart';
 import '../core/store.dart';
 import 'format.dart';
+import 'numbered_input.dart';
 import 'task_bar.dart';
 
 /// Opens the Quick Add sheet. Resolves to the created note, or null.
@@ -140,6 +141,7 @@ class _QuickAddSheetState extends State<QuickAddSheet> {
             minLines: 2,
             maxLines: 5,
             textInputAction: TextInputAction.newline,
+            inputFormatters: const [NumberedListFormatter()],
             decoration: InputDecoration(
               hintText: listening ? 'Listening…' : 'Type or tap the mic',
               filled: true,

@@ -405,9 +405,10 @@ class _SettingsPageState extends State<SettingsPage> {
                 _section(context, 'Google Drive sync', [
                   Text(
                     'Notes and attachments are encrypted on this device with your '
-                    'passphrase, then saved in a hidden app folder in your Google '
-                    'Drive. Inkwell cannot see any of your other Drive files, and '
-                    'Google only ever sees encrypted data.',
+                    'passphrase, then saved in a folder called "Inkwell Sync" in '
+                    'your Google Drive. Inkwell can only see files it created itself, '
+                    'never your other Drive files, and Google only ever sees '
+                    'encrypted data. Please do not edit or delete files in that folder.',
                     style: text.bodyMedium?.copyWith(color: cs.onSurfaceVariant),
                   ),
                   const SizedBox(height: 16),

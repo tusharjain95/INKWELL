@@ -5,7 +5,6 @@ import 'dart:typed_data';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
-import 'package:inkwell/core/models.dart';
 import 'package:inkwell/core/nlp.dart';
 import 'package:inkwell/core/settings.dart';
 import 'package:inkwell/core/store.dart';
@@ -17,6 +16,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// An in-memory stand-in for the Drive v3 endpoints Inkwell uses.
 class FakeDrive {
   final Map<String, ({String name, Uint8List bytes, int version, DateTime created})> files = {};
+  final List<Map<String, dynamic>> folders = [];
   int _n = 0;
   int calls = 0;
 
@@ -41,7 +41,20 @@ class FakeDrive {
     calls++;
     final path = r.url.path;
     final q = r.url.queryParameters;
+    if (r.method == 'GET' && path == '/drive/v3/files' && (q['q'] ?? '').contains('google-apps.folder')) {
+      return http.Response(jsonEncode({'files': folders}), 200);
+    }
+    if (r.method == 'POST' && path == '/drive/v3/files') {
+      final j = jsonDecode(r.body) as Map<String, dynamic>;
+      folders.add({
+        'id': 'folder${folders.length + 1}',
+        'name': j['name'],
+        'createdTime': DateTime.now().toUtc().toIso8601String(),
+      });
+      return http.Response(jsonEncode(folders.last), 200);
+    }
     if (r.method == 'GET' && path == '/drive/v3/files') {
+      expect(q['q'], contains("'folder1' in parents"));
       return http.Response(
           jsonEncode({'files': [for (final id in files.keys) _meta(id)]}), 200);
     }
@@ -90,10 +103,10 @@ void main() {
   group('multipart body', () {
     test('contains metadata, bytes and closing boundary', () {
       final body = DriveClient.buildMultipart(
-          'B', {'name': 'x', 'parents': ['appDataFolder']}, Uint8List.fromList([1, 2, 3]));
+          'B', {'name': 'x', 'parents': ['folder1']}, Uint8List.fromList([1, 2, 3]));
       final s = latin1.decode(body);
       expect(s.startsWith('--B\r\nContent-Type: application/json'), isTrue);
-      expect(s.contains('"parents":["appDataFolder"]'), isTrue);
+      expect(s.contains('"parents":["folder1"]'), isTrue);
       expect(s.endsWith('\r\n--B--'), isTrue);
       expect(body.contains(3), isTrue);
     });
@@ -107,6 +120,15 @@ void main() {
       final c = DriveClient(
         DriveTokenSource(auth, 'r'),
         client: MockClient((r) async {
+          if ((r.url.queryParameters['q'] ?? '').contains('google-apps.folder')) {
+            return http.Response(
+                jsonEncode({
+                  'files': [
+                    {'id': 'folder1', 'name': 'Inkwell Sync'}
+                  ]
+                }),
+                200);
+          }
           page++;
           if (page == 1) {
             return http.Response(
@@ -146,10 +168,16 @@ void main() {
           apiCalls++;
           if (apiCalls == 1) return http.Response('{}', 401);
           expect(r.headers['Authorization'], 'Bearer tok2');
-          return http.Response(jsonEncode({'files': []}), 200);
+          return http.Response(
+              jsonEncode({
+                'files': [
+                  {'id': 'folder1', 'name': 'Inkwell Sync'}
+                ]
+              }),
+              200);
         }),
       );
-      expect(await c.list(), isEmpty);
+      await c.list();
       expect(tokenCalls, 2);
     });
 
@@ -259,7 +287,7 @@ void main() {
       final before = drive.calls;
       final r = await syncA.syncOnce(client: drive.client());
       expect(r.upToDate, isTrue);
-      expect(drive.calls - before, 1); // just the listing
+      expect(drive.calls - before, 2); // folder lookup + listing
     }, timeout: const Timeout(Duration(minutes: 2)));
 
     test('an attachment uploads once and downloads on the other device', () async {

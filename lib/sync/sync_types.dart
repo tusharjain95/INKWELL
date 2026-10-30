@@ -1,5 +1,3 @@
-import 'dart:async';
-
 class SyncException implements Exception {
   SyncException(this.message);
   final String message;

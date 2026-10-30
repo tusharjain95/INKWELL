@@ -42,7 +42,9 @@ class DriveFile {
       );
 }
 
-/// Minimal Google Drive v3 client for the hidden `appDataFolder` space.
+/// Minimal Google Drive v3 client. With the `drive.file` scope Inkwell can only
+/// see files it created itself, so everything lives in one folder named
+/// [folderName] that the client finds (or creates) on first use.
 class DriveClient {
   DriveClient(this._tokens, {http.Client? client}) : _http = client ?? http.Client();
 
@@ -51,16 +53,54 @@ class DriveClient {
 
   static const String _api = 'https://www.googleapis.com/drive/v3';
   static const String _upload = 'https://www.googleapis.com/upload/drive/v3';
+  static const String folderName = 'Inkwell Sync';
+  static const String _folderMime = 'application/vnd.google-apps.folder';
+  String? _folderId;
+
+  /// The sync folder's id. If several exist (two devices created it at the
+  /// same moment) the oldest wins, so every device converges on one.
+  Future<String> _folder() async {
+    final cached = _folderId;
+    if (cached != null) return cached;
+    Future<List<DriveFile>> find() async {
+      final uri = Uri.parse('$_api/files').replace(queryParameters: {
+        'q': "mimeType = '$_folderMime' and name = '$folderName' and trashed = false",
+        'pageSize': '100',
+        'fields': 'files($_fields)',
+      });
+      final r = await _send('GET', uri);
+      final j = jsonDecode(r.body) as Map<String, dynamic>;
+      final all = [
+        for (final f in (j['files'] as List? ?? const []))
+          DriveFile.fromJson((f as Map).cast<String, dynamic>())
+      ]..sort((a, b) => (a.created ?? DateTime(0)).compareTo(b.created ?? DateTime(0)));
+      return all;
+    }
+
+    var found = await find();
+    if (found.isEmpty) {
+      await _send(
+        'POST',
+        Uri.parse('$_api/files').replace(queryParameters: {'fields': _fields}),
+        headers: {'Content-Type': 'application/json'},
+        body: Uint8List.fromList(utf8.encode(jsonEncode({'name': folderName, 'mimeType': _folderMime}))),
+      );
+      found = await find();
+    }
+    if (found.isEmpty) throw DriveException('Could not create the Inkwell folder in Google Drive.');
+    return _folderId = found.first.id;
+  }
+
   static const String _fields = 'id,name,md5Checksum,modifiedTime,createdTime';
 
-  /// Every file in the app folder (all pages).
+  /// Every file in the sync folder (all pages).
   Future<List<DriveFile>> list() async {
+    final folder = await _folder();
     final out = <DriveFile>[];
     String? page;
     do {
       final uri = Uri.parse('$_api/files').replace(queryParameters: {
-        'spaces': 'appDataFolder',
-        'q': 'trashed = false',
+        'q': "'$folder' in parents and trashed = false",
         'pageSize': '1000',
         'fields': 'nextPageToken,files($_fields)',
         if (page != null) 'pageToken': page,
@@ -88,12 +128,13 @@ class DriveClient {
   }
 
   Future<DriveFile> create(String name, Uint8List bytes) async {
+    final folder = await _folder();
     final boundary = 'inkwell${Random().nextInt(1 << 31)}';
     final body = buildMultipart(
       boundary,
       {
         'name': name,
-        'parents': ['appDataFolder'],
+        'parents': [folder],
       },
       bytes,
     );

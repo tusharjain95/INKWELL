@@ -22,10 +22,10 @@ const String _ext = '.enc';
 /// same end-to-end encryption, but each file is written on its own because
 /// Drive has no atomic multi-file commit.
 ///
-/// Files live in the hidden app-data folder, flat:
+/// Files live in one Drive folder named "Inkwell Sync", flat:
 ///   meta.json          salt + passphrase check
-///   n_<note id>.enc    one encrypted file per note
-///   b_<keyed hash>.enc one encrypted file per attachment
+///   `n_<note id>.enc`    one encrypted file per note
+///   `b_<keyed hash>.enc` one encrypted file per attachment
 class DriveSync {
   DriveSync(this.store, this.settings, {DriveAuth? auth, String Function()? passphrase})
       : _auth = auth ?? DriveAuth(),

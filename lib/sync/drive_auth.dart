@@ -42,9 +42,10 @@ class DriveTokens {
 /// browser, and the app polls until approved. It needs no redirect handling,
 /// so it behaves the same on Android and Windows.
 ///
-/// Inkwell only asks for the `drive.appdata` scope, a hidden app folder that
-/// no other app (and not the user's own Drive files) is part of, plus the
-/// account's email address to show who is signed in.
+/// Inkwell only asks for the `drive.file` scope (the only Drive scope the
+/// device flow allows): it can see just the files it created itself, never the
+/// rest of the user's Drive. Plus the account's email address, to show who is
+/// signed in.
 class DriveAuth {
   DriveAuth({http.Client? client}) : _http = client ?? http.Client();
 
@@ -58,7 +59,7 @@ class DriveAuth {
   static bool get configured => clientId.isNotEmpty && clientSecret.isNotEmpty;
 
   static const String scope =
-      'https://www.googleapis.com/auth/drive.appdata email';
+      'https://www.googleapis.com/auth/drive.file email';
 
   static final Uri _deviceUri = Uri.parse('https://oauth2.googleapis.com/device/code');
   static final Uri _tokenUri = Uri.parse('https://oauth2.googleapis.com/token');

@@ -167,15 +167,16 @@ Honest limits:
 
 In **Settings → Sync to**, choose **Google Drive**. Inkwell stores everything
 (notes, tasks, attachments) end-to-end encrypted with your passphrase, in the
-hidden *app data* area of your own Drive. It is not visible in the Drive UI and
-Inkwell can see nothing else in your Drive (scope `drive.appdata`).
+a folder named **Inkwell Sync** in your own Drive. Inkwell asks only for the
+`drive.file` scope, so it can see just the files it created, never the rest of
+your Drive. Don't edit or delete files in that folder; they are encrypted.
 
 One-time setup by whoever builds the app (about 10 minutes, free):
 
 1. Go to <https://console.cloud.google.com>, create a project, and enable the
    **Google Drive API**.
 2. **OAuth consent screen**: user type External, add scopes
-   `.../auth/drive.appdata` and `email`, then **Publish app** (move it from
+   `.../auth/drive.file` and `email`, then **Publish app** (move it from
    *Testing* to *In production*). Left in Testing, Google expires sign-ins
    after 7 days. These scopes are non-sensitive, so no verification is needed.
 3. **Credentials → Create credentials → OAuth client ID**, application type

@@ -26,6 +26,13 @@ void main() {
       );
     });
 
+    test('identical copies on both sides are not a conflict', () {
+      expect(
+        decide(local: _note('a', 4), remote: _note('a', 4), dirty: true, remoteChanged: true),
+        MergeAction.takeRemote,
+      );
+    });
+
     test('only remote changed -> take remote', () {
       expect(
         decide(local: _note('a', 1), remote: _note('a', 2), dirty: false, remoteChanged: true),

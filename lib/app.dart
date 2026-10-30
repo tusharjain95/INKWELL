@@ -46,7 +46,7 @@ class _InkwellAppState extends State<InkwellApp> with WidgetsBindingObserver {
   void _applyBackground() {
     final s = context.read<AppSettings>();
     BackgroundSync.apply(
-        enabled: s.backgroundSync && s.autoSync && s.config.isComplete);
+        enabled: s.backgroundSync && s.autoSync && s.syncReady);
   }
 
   @override

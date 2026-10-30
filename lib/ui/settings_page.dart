@@ -1,13 +1,18 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:provider/provider.dart';
 
 import '../core/image_compress.dart';
 import '../core/reminders.dart';
 import '../core/settings.dart';
 import '../core/speech.dart';
+import '../core/store.dart';
 import '../sync/background_sync.dart';
+import '../sync/drive_auth.dart';
 import '../sync/sync_service.dart';
 import '../sync/update_service.dart';
 import 'format.dart';
@@ -25,6 +30,13 @@ class _SettingsPageState extends State<SettingsPage> {
   late final TextEditingController _branch;
   late final TextEditingController _token;
   late final TextEditingController _pass;
+  late final TextEditingController _drivePass;
+  bool _showDrivePass = false;
+  bool _driveBusy = false;
+  bool _driveOk = false;
+  bool _driveDialogOpen = false;
+  bool _driveCancelled = false;
+  String? _driveResult;
   bool _showToken = false;
   bool _showPass = false;
   bool _busy = false;
@@ -40,6 +52,8 @@ class _SettingsPageState extends State<SettingsPage> {
     _branch = TextEditingController(text: c.branch);
     _token = TextEditingController(text: c.token);
     _pass = TextEditingController(text: c.passphrase);
+    _drivePass = TextEditingController(
+        text: context.read<AppSettings>().drivePassphrase);
   }
 
   @override
@@ -48,6 +62,7 @@ class _SettingsPageState extends State<SettingsPage> {
     _branch.dispose();
     _token.dispose();
     _pass.dispose();
+    _drivePass.dispose();
     super.dispose();
   }
 
@@ -121,6 +136,121 @@ class _SettingsPageState extends State<SettingsPage> {
     });
   }
 
+  Future<void> _switchProvider(SyncProvider p) async {
+    final settings = context.read<AppSettings>();
+    if (settings.syncProvider == p) return;
+    final store = context.read<NoteStore>();
+    await settings.setSyncProvider(p);
+    // Everything on this device is uploaded to the new place; copies that are
+    // already there are recognised and not duplicated.
+    await store.resetSyncBaseline();
+    if (mounted) {
+      setState(() {
+        _result = null;
+        _driveResult = null;
+      });
+    }
+  }
+
+  Future<void> _driveSignIn() async {
+    final pass = _drivePass.text;
+    if (pass.isEmpty) {
+      setState(() {
+        _driveOk = false;
+        _driveResult = 'Choose a backup passphrase first. Use the same one on every device.';
+      });
+      return;
+    }
+    final sync = context.read<SyncService>();
+    final settings = context.read<AppSettings>();
+    final store = context.read<NoteStore>();
+    final nav = Navigator.of(context);
+    final auth = DriveAuth();
+    setState(() {
+      _driveBusy = true;
+      _driveResult = null;
+      _driveCancelled = false;
+    });
+    try {
+      final code = await auth.start();
+      if (!mounted) return;
+      _driveDialogOpen = true;
+      unawaited(showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => _DeviceCodeDialog(
+          code: code,
+          onCancel: () {
+            _driveCancelled = true;
+            _driveDialogOpen = false;
+            Navigator.of(context, rootNavigator: true).pop();
+          },
+        ),
+      ));
+      final tokens =
+          await auth.waitForApproval(code, cancelled: () => _driveCancelled);
+      if (_driveDialogOpen && mounted) {
+        _driveDialogOpen = false;
+        nav.pop();
+      }
+      final email = await auth.emailFor(tokens.accessToken) ?? '';
+      final msg =
+          await sync.verifyDrive(pass, refreshToken: tokens.refreshToken);
+      await settings.saveDrive(
+          refreshToken: tokens.refreshToken, email: email, passphrase: pass);
+      await settings.setSyncProvider(SyncProvider.drive);
+      await store.resetSyncBaseline();
+      if (!mounted) return;
+      setState(() {
+        _driveOk = true;
+        _driveResult = msg;
+      });
+      sync.maybeAutoSync();
+    } catch (e) {
+      if (_driveDialogOpen && mounted) {
+        _driveDialogOpen = false;
+        nav.pop();
+      }
+      if (!mounted) return;
+      if (_driveCancelled) {
+        setState(() => _driveResult = null);
+      } else {
+        setState(() {
+          _driveOk = false;
+          _driveResult = '$e';
+        });
+      }
+    } finally {
+      if (mounted) setState(() => _driveBusy = false);
+    }
+  }
+
+  Future<void> _driveDisconnect() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Disconnect Google Drive?'),
+        content: const Text(
+            'Your notes stay on this device and in Drive. The Google sign-in and passphrase are removed from this device.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel')),
+          FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Disconnect')),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    await context.read<AppSettings>().clearDrive();
+    if (!mounted) return;
+    setState(() {
+      _drivePass.clear();
+      _driveResult = null;
+    });
+  }
+
   Future<void> _checkUpdates() async {
     final svc = context.read<UpdateService>();
     final messenger = ScaffoldMessenger.of(context);
@@ -160,7 +290,31 @@ class _SettingsPageState extends State<SettingsPage> {
           child: ListView(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
             children: [
-              _section(context, 'GitHub sync', [
+              _section(context, 'Sync to', [
+                SegmentedButton<SyncProvider>(
+                  showSelectedIcon: false,
+                  segments: const [
+                    ButtonSegment(
+                        value: SyncProvider.github,
+                        label: Text('GitHub'),
+                        icon: Icon(Icons.code)),
+                    ButtonSegment(
+                        value: SyncProvider.drive,
+                        label: Text('Google Drive'),
+                        icon: Icon(Icons.add_to_drive_outlined)),
+                  ],
+                  selected: {settings.syncProvider},
+                  onSelectionChanged: (v) => _switchProvider(v.first),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Both keep your notes end-to-end encrypted with your passphrase. '
+                  'Switching uploads everything on this device to the new place.',
+                  style: text.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+                ),
+              ]),
+              if (settings.syncProvider == SyncProvider.github)
+                _section(context, 'GitHub sync', [
                 Text(
                   'Notes and attachments are encrypted on this device with your passphrase, '
                   'then stored in a private GitHub repository you own.',
@@ -246,6 +400,93 @@ class _SettingsPageState extends State<SettingsPage> {
                   const SizedBox(height: 12),
                   _Banner(text: _result!, ok: _resultOk),
                 ],
+              ]),
+              if (settings.syncProvider == SyncProvider.drive)
+                _section(context, 'Google Drive sync', [
+                  Text(
+                    'Notes and attachments are encrypted on this device with your '
+                    'passphrase, then saved in a hidden app folder in your Google '
+                    'Drive. Inkwell cannot see any of your other Drive files, and '
+                    'Google only ever sees encrypted data.',
+                    style: text.bodyMedium?.copyWith(color: cs.onSurfaceVariant),
+                  ),
+                  const SizedBox(height: 16),
+                  if (!DriveAuth.configured)
+                    const _Banner(
+                        ok: false,
+                        text: 'This build has no Google credentials, so Drive sign-in '
+                            'is unavailable. See "Google Drive sync" in the README.')
+                  else ...[
+                    if (settings.driveSignedIn)
+                      ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        leading: const Icon(Icons.account_circle_outlined),
+                        title: Text(settings.driveEmail.isEmpty
+                            ? 'Signed in to Google'
+                            : settings.driveEmail),
+                        subtitle: const Text('Signed in'),
+                      ),
+                    TextField(
+                      controller: _drivePass,
+                      obscureText: !_showDrivePass,
+                      autocorrect: false,
+                      enableSuggestions: false,
+                      decoration: InputDecoration(
+                        labelText: 'Backup passphrase',
+                        helperText:
+                            'Use the same passphrase on every device. If you lose it, synced notes cannot be recovered.',
+                        helperMaxLines: 3,
+                        suffixIcon: IconButton(
+                          icon: Icon(_showDrivePass
+                              ? Icons.visibility_off
+                              : Icons.visibility),
+                          onPressed: () =>
+                              setState(() => _showDrivePass = !_showDrivePass),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        FilledButton.icon(
+                          onPressed: _driveBusy ? null : _driveSignIn,
+                          icon: _driveBusy
+                              ? const SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: CircularProgressIndicator(strokeWidth: 2))
+                              : const Icon(Icons.login),
+                          label: Text(settings.driveSignedIn
+                              ? 'Sign in again'
+                              : 'Sign in with Google'),
+                        ),
+                        if (settings.driveSignedIn)
+                          TextButton(
+                            onPressed: _driveDisconnect,
+                            child: const Text('Disconnect'),
+                          ),
+                      ],
+                    ),
+                    if (_driveResult != null) ...[
+                      const SizedBox(height: 12),
+                      _Banner(text: _driveResult!, ok: _driveOk),
+                    ],
+                  ],
+                ]),
+              _section(context, 'Sync', [
+                Consumer<SyncService>(
+                  builder: (context, sync, _) => Align(
+                    alignment: Alignment.centerLeft,
+                    child: OutlinedButton.icon(
+                      onPressed:
+                          (!sync.configured || sync.running) ? null : sync.syncNow,
+                      icon: const Icon(Icons.sync),
+                      label: Text(sync.running ? 'Syncing…' : 'Sync now'),
+                    ),
+                  ),
+                ),
                 const SizedBox(height: 8),
                 Consumer<SyncService>(
                   builder: (context, sync, _) {
@@ -402,7 +643,8 @@ class _SettingsPageState extends State<SettingsPage> {
                   style: text.bodySmall?.copyWith(color: cs.onSurfaceVariant),
                 ),
               ]),
-              _section(context, 'Set up in two minutes', [
+              if (settings.syncProvider == SyncProvider.github)
+                _section(context, 'Set up in two minutes', [
                 Text(
                   '1. On GitHub create a new PRIVATE repository (tick "Add a README").\n'
                   '2. Settings → Developer settings → Personal access tokens → Fine-grained tokens → '
@@ -524,6 +766,70 @@ class _Banner extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+
+/// Shows the code to type at google.com/device while sign-in is pending.
+class _DeviceCodeDialog extends StatelessWidget {
+  const _DeviceCodeDialog({required this.code, required this.onCancel});
+
+  final DeviceCode code;
+  final VoidCallback onCancel;
+
+  @override
+  Widget build(BuildContext context) {
+    final text = Theme.of(context).textTheme;
+    return AlertDialog(
+      title: const Text('Sign in to Google'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('1. Open ${code.verificationUrl} on any device.'),
+          const SizedBox(height: 8),
+          const Text('2. Enter this code and approve access:'),
+          const SizedBox(height: 12),
+          Center(
+            child: SelectableText(
+              code.userCode,
+              style: text.headlineMedium
+                  ?.copyWith(fontWeight: FontWeight.w700, letterSpacing: 2),
+            ),
+          ),
+          const SizedBox(height: 16),
+          Wrap(
+            spacing: 8,
+            children: [
+              FilledButton.tonalIcon(
+                icon: const Icon(Icons.open_in_new),
+                label: const Text('Open'),
+                onPressed: () => launchUrl(Uri.parse(code.verificationUrl),
+                    mode: LaunchMode.externalApplication),
+              ),
+              OutlinedButton.icon(
+                icon: const Icon(Icons.copy),
+                label: const Text('Copy code'),
+                onPressed: () =>
+                    Clipboard.setData(ClipboardData(text: code.userCode)),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          const Row(
+            children: [
+              SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2)),
+              SizedBox(width: 10),
+              Expanded(child: Text('Waiting for approval…')),
+            ],
+          ),
+        ],
+      ),
+      actions: [TextButton(onPressed: onCancel, child: const Text('Cancel'))],
     );
   }
 }

@@ -79,6 +79,10 @@ void _patchAndroid() {
         <intent>
             <action android:name="android.speech.RecognitionService"/>
         </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+            <data android:scheme="https"/>
+        </intent>
 ''';
     m = m.replaceFirstMapped(
       RegExp(r'<manifest[^>]*>'),

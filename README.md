@@ -163,6 +163,33 @@ Honest limits:
   enabled; if it is not available the app says so and you can use Win+H.
 - Windows reminders only fire while Inkwell is running (tray counts).
 
+## Google Drive sync (alternative to GitHub)
+
+In **Settings → Sync to**, choose **Google Drive**. Inkwell stores everything
+(notes, tasks, attachments) end-to-end encrypted with your passphrase, in the
+hidden *app data* area of your own Drive. It is not visible in the Drive UI and
+Inkwell can see nothing else in your Drive (scope `drive.appdata`).
+
+One-time setup by whoever builds the app (about 10 minutes, free):
+
+1. Go to <https://console.cloud.google.com>, create a project, and enable the
+   **Google Drive API**.
+2. **OAuth consent screen**: user type External, add scopes
+   `.../auth/drive.appdata` and `email`, then **Publish app** (move it from
+   *Testing* to *In production*). Left in Testing, Google expires sign-ins
+   after 7 days. These scopes are non-sensitive, so no verification is needed.
+3. **Credentials → Create credentials → OAuth client ID**, application type
+   **TVs and Limited Input devices**. Copy the client ID and client secret.
+4. In the GitHub repo: **Settings → Secrets and variables → Actions**, add
+   `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`.
+5. Push a new tag (for example `v2.6.0`) to build and release.
+
+In the app, tap **Sign in with Google**, open google.com/device on any
+browser, and enter the code shown. Use the same passphrase on every device.
+
+Switching provider re-uploads what exists on this device to the new place;
+attachments not yet downloaded here cannot be re-uploaded.
+
 ## Reminders, sharing, tray and cleanup
 
 **Task reminders.** A task with a due date notifies you when it is due. On

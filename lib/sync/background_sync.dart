@@ -35,7 +35,7 @@ Future<bool> runBackgroundSync() async {
     final settings = await AppSettings.load();
     if (!settings.backgroundSync ||
         !settings.autoSync ||
-        !settings.config.isComplete) {
+        !settings.syncReady) {
       return true;
     }
 

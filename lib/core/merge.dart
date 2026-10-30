@@ -39,6 +39,9 @@ MergeAction decide({
     return local != null ? MergeAction.pushLocal : MergeAction.none;
   }
   if (local == null || !dirty) return MergeAction.takeRemote;
+  // Same edit time on both sides means the same version (for example after
+  // switching sync provider): nothing to upload and nothing to keep as a copy.
+  if (local.updatedAt == remote.updatedAt) return MergeAction.takeRemote;
   return remote.updatedAt.isBefore(local.updatedAt)
       ? MergeAction.conflictKeepLocal
       : MergeAction.conflictKeepRemote;

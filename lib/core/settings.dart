@@ -4,6 +4,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'image_compress.dart';
 
+/// Where notes are synced to.
+enum SyncProvider { github, drive }
+
 class SyncConfig {
   const SyncConfig({
     this.token = '',
@@ -46,14 +49,19 @@ class SyncConfig {
 /// This class is also loaded inside the Android background-sync worker, so it
 /// must not depend on any UI.
 class AppSettings extends ChangeNotifier {
-  AppSettings._(this._prefs, this._secure, this.config);
+  AppSettings._(this._prefs, this._secure, this.config,
+      this._driveToken, this._drivePass);
 
   final SharedPreferences _prefs;
   final FlutterSecureStorage _secure;
   SyncConfig config;
+  String _driveToken;
+  String _drivePass;
 
   static const _kToken = 'sync.token';
   static const _kPass = 'sync.passphrase';
+  static const _kDriveToken = 'drive.refresh';
+  static const _kDrivePass = 'drive.passphrase';
 
   // ---- preferences, with defaults -------------------------------------------
 
@@ -81,6 +89,22 @@ class AppSettings extends ChangeNotifier {
 
   /// How "12/11" is read: 12 November (true) or December 11 (false).
   bool get dayFirstDates => _prefs.getBool('dates.dayfirst') ?? true;
+
+  SyncProvider get syncProvider => SyncProvider.values.firstWhere(
+        (p) => p.name == _prefs.getString('sync.provider'),
+        orElse: () => SyncProvider.github,
+      );
+
+  /// Google sign-in (refresh token) and the passphrase used with Drive.
+  String get driveRefreshToken => _driveToken;
+  String get drivePassphrase => _drivePass;
+  String get driveEmail => _prefs.getString('drive.email') ?? '';
+  bool get driveSignedIn => _driveToken.isNotEmpty;
+
+  /// Whether the selected provider has everything it needs to sync.
+  bool get syncReady => syncProvider == SyncProvider.drive
+      ? (_driveToken.isNotEmpty && _drivePass.isNotEmpty)
+      : config.isComplete;
 
   /// Notify when a task is due.
   bool get remindersEnabled => _prefs.getBool('reminders.enabled') ?? true;
@@ -114,7 +138,8 @@ class AppSettings extends ChangeNotifier {
       repo: prefs.getString('sync.repo') ?? '',
       branch: prefs.getString('sync.branch') ?? 'main',
     );
-    return AppSettings._(prefs, secure, config);
+    return AppSettings._(
+        prefs, secure, config, await read(_kDriveToken), await read(_kDrivePass));
   }
 
   Future<void> saveSync(SyncConfig c) async {
@@ -123,6 +148,31 @@ class AppSettings extends ChangeNotifier {
     await _prefs.setString('sync.branch', c.branch.trim());
     await _secure.write(key: _kToken, value: c.token.trim());
     await _secure.write(key: _kPass, value: c.passphrase);
+    notifyListeners();
+  }
+
+  Future<void> setSyncProvider(SyncProvider p) =>
+      _set(_prefs.setString('sync.provider', p.name));
+
+  Future<void> saveDrive({
+    required String refreshToken,
+    required String email,
+    required String passphrase,
+  }) async {
+    _driveToken = refreshToken;
+    _drivePass = passphrase;
+    await _secure.write(key: _kDriveToken, value: refreshToken);
+    await _secure.write(key: _kDrivePass, value: passphrase);
+    await _prefs.setString('drive.email', email);
+    notifyListeners();
+  }
+
+  Future<void> clearDrive() async {
+    _driveToken = '';
+    _drivePass = '';
+    await _secure.delete(key: _kDriveToken);
+    await _secure.delete(key: _kDrivePass);
+    await _prefs.remove('drive.email');
     notifyListeners();
   }
 

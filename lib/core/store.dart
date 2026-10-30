@@ -378,6 +378,20 @@ class NoteStore extends ChangeNotifier {
     }
   }
 
+  /// Forget what we know about the remote and mark every note as needing an
+  /// upload. Used when the sync provider changes; identical copies already on
+  /// the new remote are recognised during the next sync, not duplicated.
+  Future<void> resetSyncBaseline() async {
+    state
+      ..lastHead = null
+      ..noteShas.clear()
+      ..blobShas.clear()
+      ..orphanSince.clear()
+      ..dirty.addAll(_notes.keys);
+    await saveState();
+    notifyListeners();
+  }
+
   Future<void> saveState() =>
       _writeAtomic(_stateFile, jsonEncode(state.toJson()));
 

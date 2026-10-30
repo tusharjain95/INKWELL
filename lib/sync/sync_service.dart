@@ -10,57 +10,18 @@ import '../core/merge.dart';
 import '../core/models.dart';
 import '../core/settings.dart';
 import '../core/store.dart';
+import 'drive_auth.dart';
+import 'drive_client.dart';
+import 'drive_sync.dart';
 import 'github_client.dart';
+import 'sync_types.dart';
 import 'worker_guard.dart';
+
+export 'sync_types.dart';
 
 const String _metaPath = 'inkwell/meta.json';
 const String _notesPrefix = 'inkwell/notes/';
 const String _blobsPrefix = 'inkwell/blobs/';
-
-class SyncException implements Exception {
-  SyncException(this.message);
-  final String message;
-  @override
-  String toString() => message;
-}
-
-class SyncReport {
-  const SyncReport({
-    this.pulled = 0,
-    this.pushed = 0,
-    this.uploads = 0,
-    this.conflicts = 0,
-    this.upToDate = false,
-    this.removed = 0,
-  });
-
-  final int pulled;
-  final int pushed;
-  final int uploads;
-  final int conflicts;
-  final bool upToDate;
-
-  /// Abandoned attachments deleted from the repository.
-  final int removed;
-
-  String describe() {
-    if (upToDate || (pulled == 0 && pushed == 0 && uploads == 0 && removed == 0)) {
-      return 'Everything is up to date.';
-    }
-    final parts = <String>[
-      if (pulled > 0) '$pulled downloaded',
-      if (pushed > 0) '$pushed uploaded',
-      if (uploads > 0) '$uploads attachment${uploads == 1 ? '' : 's'}',
-      if (removed > 0) '$removed unused attachment${removed == 1 ? '' : 's'} removed',
-      if (conflicts > 0)
-        '$conflicts conflict${conflicts == 1 ? '' : 's'} (both versions kept)',
-    ];
-    return parts.join(' · ');
-  }
-}
-
-/// How long an unused attachment stays in the repository before it is deleted.
-const Duration _orphanGrace = Duration(days: 14);
 
 /// Syncs the local [NoteStore] with a private GitHub repository.
 ///
@@ -93,7 +54,17 @@ class SyncService extends ChangeNotifier {
       ? null
       : DateTime.fromMillisecondsSinceEpoch(store.state.lastSyncAt!);
 
-  bool get configured => settings.config.isComplete;
+  bool get configured => settings.syncReady;
+
+  bool get _usesDrive => settings.syncProvider == SyncProvider.drive;
+  late final DriveSync _drive = DriveSync(store, settings);
+
+  /// Checks a Google Drive sign-in and passphrase without changing anything.
+  Future<String> verifyDrive(String passphrase, {String? refreshToken}) {
+    final token = refreshToken ?? settings.driveRefreshToken;
+    return _drive.verify(passphrase,
+        client: DriveClient(DriveTokenSource(DriveAuth(), token)));
+  }
 
   void start() {
     store.addListener(_onStoreChanged);
@@ -169,8 +140,8 @@ class SyncService extends ChangeNotifier {
   Future<SyncReport?> syncNow() async {
     if (running) return null;
     final cfg = settings.config;
-    if (!cfg.isComplete) {
-      lastError = 'Set up GitHub sync in Settings first.';
+    if (!settings.syncReady) {
+      lastError = 'Set up sync in Settings first.';
       notifyListeners();
       return null;
     }
@@ -190,7 +161,7 @@ class SyncService extends ChangeNotifier {
       SyncReport? report;
       for (var attempt = 0; attempt < 4; attempt++) {
         try {
-          report = await _syncOnce(cfg);
+          report = _usesDrive ? await _drive.syncOnce() : await _syncOnce(cfg);
           break;
         } on RefConflictException {
           _vault = null; // another device may have just created meta.json
@@ -208,6 +179,10 @@ class SyncService extends ChangeNotifier {
     } on GitHubException catch (e) {
       lastError = e.message;
     } on SyncException catch (e) {
+      lastError = e.message;
+    } on DriveException catch (e) {
+      lastError = e.message;
+    } on DriveAuthException catch (e) {
       lastError = e.message;
     } on CryptoException catch (e) {
       lastError = e.message;
@@ -233,7 +208,7 @@ class SyncService extends ChangeNotifier {
     }
     final nowMs = DateTime.now().millisecondsSinceEpoch;
     final cleanupDue = state.orphanSince.values
-        .any((t) => nowMs - t >= _orphanGrace.inMilliseconds);
+        .any((t) => nowMs - t >= kOrphanGrace.inMilliseconds);
     if (head == state.lastHead && state.dirty.isEmpty && !cleanupDue) {
       return const SyncReport(upToDate: true);
     }
@@ -379,7 +354,7 @@ class SyncService extends ChangeNotifier {
     for (final name in remoteBlobs.keys) {
       if (referenced.contains(name) || uploadedBlobs.containsKey(name)) continue;
       final since = state.orphanSince.putIfAbsent(name, () => nowMs);
-      if (nowMs - since >= _orphanGrace.inMilliseconds) {
+      if (nowMs - since >= kOrphanGrace.inMilliseconds) {
         entries.add(TreeEntry.delete('$_blobsPrefix$name.enc'));
         removedNames.add(name);
       }
@@ -434,10 +409,11 @@ class SyncService extends ChangeNotifier {
     if (await local.exists()) return local;
 
     final cfg = settings.config;
-    if (!cfg.isComplete) {
+    if (!settings.syncReady) {
       throw SyncException(
           'This attachment is not on this device yet. Set up sync to download it.');
     }
+    if (_usesDrive) return _drive.ensureAttachment(ref);
     final gh = _client(cfg);
     final head = await gh.headSha();
     if (head == null) throw SyncException('The sync branch is empty.');

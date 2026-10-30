@@ -59,15 +59,15 @@ class SyncReport {
   }
 }
 
+/// How long an unused attachment stays in the repository before it is deleted.
+const Duration _orphanGrace = Duration(days: 14);
+
 /// Syncs the local [NoteStore] with a private GitHub repository.
 ///
 /// Repository layout (everything is AES-256-GCM encrypted except meta.json):
 ///   inkwell/meta.json              salt + passphrase check
 ///   inkwell/notes/`<id>`.enc         one file per note
 ///   inkwell/blobs/`<keyed-hash>`.enc one file per attachment
-/// How long an unused attachment stays in the repository before it is deleted.
-const Duration _orphanGrace = Duration(days: 14);
-
 class SyncService extends ChangeNotifier {
   SyncService(this.store, this.settings, {this.guard});
 
@@ -99,7 +99,7 @@ class SyncService extends ChangeNotifier {
     store.addListener(_onStoreChanged);
     _periodic?.cancel();
     _periodic =
-        Timer.periodic(const Duration(minutes: 10), (_) => maybeAutoSync());
+        Timer.periodic(const Duration(minutes: 5), (_) => maybeAutoSync());
   }
 
   @override
@@ -110,11 +110,26 @@ class SyncService extends ChangeNotifier {
     super.dispose();
   }
 
+  int _followUps = 0;
+
   void _onStoreChanged() {
     if (running || store.state.dirty.isEmpty) return;
     if (!settings.autoSync || !configured) return;
+    _followUps = 0;
     _debounce?.cancel();
-    _debounce = Timer(const Duration(seconds: 20), maybeAutoSync);
+    // Short, so a tick or quick edit reaches the other device before you pick
+    // it up. Typing keeps pushing the timer back until you pause.
+    _debounce = Timer(const Duration(seconds: 4), maybeAutoSync);
+  }
+
+  /// A change made while a sync was uploading is left dirty by that sync;
+  /// run again shortly so it is not stranded until the next edit.
+  void _followUpIfDirty() {
+    if (lastError != null || store.state.dirty.isEmpty) return;
+    if (!settings.autoSync || !configured || _followUps >= 2) return;
+    _followUps++;
+    _debounce?.cancel();
+    _debounce = Timer(const Duration(seconds: 3), maybeAutoSync);
   }
 
   Future<void> maybeAutoSync() async {
@@ -202,6 +217,7 @@ class SyncService extends ChangeNotifier {
       if (locked) await guard?.release();
       running = false;
       notifyListeners();
+      _followUpIfDirty();
     }
     return null;
   }

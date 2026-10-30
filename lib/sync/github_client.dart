@@ -65,7 +65,7 @@ class GitHubClient {
     Duration timeout = const Duration(seconds: 60),
   }) async {
     try {
-      final headers = {..._headers};
+      final headers = {..._headers, 'Cache-Control': 'no-cache'};
       if (body != null) headers['Content-Type'] = 'application/json';
       final encoded = body == null ? null : jsonEncode(body);
       final Future<http.Response> call;

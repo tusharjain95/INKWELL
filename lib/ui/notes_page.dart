@@ -196,6 +196,8 @@ class _NotesPageState extends State<NotesPage> {
                 icon = const Icon(Icons.cloud_off_outlined);
               } else if (sync.lastError != null) {
                 icon = Icon(Icons.sync_problem_outlined, color: cs.error);
+              } else if (store.state.dirty.isNotEmpty) {
+                icon = Icon(Icons.cloud_upload_outlined, color: cs.primary);
               } else {
                 icon = const Icon(Icons.cloud_done_outlined);
               }
@@ -204,7 +206,10 @@ class _NotesPageState extends State<NotesPage> {
                     ? 'Syncing…'
                     : !sync.configured
                         ? 'Set up sync'
-                        : (sync.lastError ?? 'Sync now'),
+                        : (sync.lastError ??
+                            (store.state.dirty.isEmpty
+                                ? 'Sync now'
+                                : '${store.state.dirty.length} change(s) waiting to upload. Tap to sync now.')),
                 icon: icon,
                 onPressed: sync.running ? null : _syncPressed,
               );

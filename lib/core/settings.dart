@@ -82,6 +82,19 @@ class AppSettings extends ChangeNotifier {
   /// How "12/11" is read: 12 November (true) or December 11 (false).
   bool get dayFirstDates => _prefs.getBool('dates.dayfirst') ?? true;
 
+  /// Notify when a task is due.
+  bool get remindersEnabled => _prefs.getBool('reminders.enabled') ?? true;
+
+  /// Hour (0-23) for the reminder of a task that has a date but no time.
+  int get reminderHour => (_prefs.getInt('reminders.hour') ?? 9).clamp(0, 23);
+
+  /// Windows: closing the window keeps Inkwell running in the system tray, so
+  /// it keeps syncing and reminding.
+  bool get keepInTray => _prefs.getBool('win.tray') ?? true;
+
+  /// Windows: start with Windows (minimised to the tray).
+  bool get startWithWindows => _prefs.getBool('win.startup') ?? false;
+
   static Future<AppSettings> load() async {
     final prefs = await SharedPreferences.getInstance();
     final secure = FlutterSecureStorage(
@@ -135,4 +148,14 @@ class AppSettings extends ChangeNotifier {
   Future<void> setOnDeviceSpeech(bool v) => _set(_prefs.setBool('speech.ondevice', v));
   Future<void> setSpeechLocale(String id) => _set(_prefs.setString('speech.locale', id));
   Future<void> setDayFirstDates(bool v) => _set(_prefs.setBool('dates.dayfirst', v));
+  Future<void> setRemindersEnabled(bool v) => _set(_prefs.setBool('reminders.enabled', v));
+  Future<void> setReminderHour(int h) => _set(_prefs.setInt('reminders.hour', h));
+  Future<void> setKeepInTray(bool v) => _set(_prefs.setBool('win.tray', v));
+  Future<void> setStartWithWindows(bool v) => _set(_prefs.setBool('win.startup', v));
+
+  /// Small string/JSON helpers for services that keep their own state.
+  String? getString(String key) => _prefs.getString(key);
+  Future<void> putString(String key, String value) async {
+    await _prefs.setString(key, value);
+  }
 }

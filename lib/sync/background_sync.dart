@@ -4,6 +4,7 @@ import 'dart:ui' show DartPluginRegistrant;
 
 import 'package:workmanager/workmanager.dart';
 
+import '../core/reminders.dart';
 import '../core/settings.dart';
 import '../core/store.dart';
 import 'sync_service.dart';
@@ -41,6 +42,10 @@ Future<bool> runBackgroundSync() async {
     final store = await NoteStore.open();
     final sync = SyncService(store, settings, guard: guard);
     await sync.syncNow(); // takes and releases the shared lock itself
+    // Tasks pulled from another device may need new reminders.
+    final reminders = ReminderService(settings);
+    await reminders.reschedule(store);
+    reminders.dispose();
     sync.dispose();
     store.dispose();
     return true;

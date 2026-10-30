@@ -161,7 +161,35 @@ Honest limits:
   device may use its online speech service. Inkwell never uploads audio itself.
 - On Windows, voice input depends on the system's speech recognition being
   enabled; if it is not available the app says so and you can use Win+H.
-- Tasks have no reminders or notifications yet.
+- Windows reminders only fire while Inkwell is running (tray counts).
+
+## Reminders, sharing, tray and cleanup
+
+**Task reminders.** A task with a due date notifies you when it is due. On
+Android the reminder is handed to the system alarm service, so it works with the
+app closed and survives a reboot. Allow notifications when asked; if reminders
+arrive late, also allow "Alarms & reminders" and set Inkwell's battery use to
+unrestricted. Tasks that have a date but no time notify at a time you choose
+(Settings, default 09:00). On Windows, unpackaged apps cannot use scheduled
+toasts, so reminders fire while Inkwell is running, which includes sitting in
+the system tray.
+
+**Share to Inkwell.** Share text, a link, photos or PDFs from any Android app and
+pick Inkwell: it creates a note with the text and the files attached (photos are
+compressed per your setting). On Windows, drop files onto the window to make a
+note with them attached.
+
+**Windows tray.** Closing the window hides Inkwell in the system tray so syncing
+and reminders keep running; quit from the tray menu. Optionally start with
+Windows (minimised). Only one copy runs; launching it again shows the first.
+Tray mode replaces the lack of a Windows background service. If the installer
+cannot replace a running copy, quit it from the tray first.
+
+**Attachment cleanup.** Attachments that no note uses any more are deleted from
+the repository 14 days after sync first notices, so a device that was offline can
+still sync. Git history keeps older versions, so this trims the current files
+but does not shrink the repository's history. Sync also re-uploads an attachment
+that a synced note references but the repository lacks, if this device has it.
 
 ## Project layout
 
@@ -180,9 +208,6 @@ installer/   Inno Setup script for the Windows installer
 - PDFs open in your system PDF app. An in-app viewer (`pdfrx`) is a good
   addition but adds ~10 MB per platform.
 - Only images are compressed; PDFs and other files are stored as picked.
-- Task reminders / notifications are not implemented.
-- Attachments removed from notes stay in the repository (and its history).
-- Share-to-Inkwell from other Android apps, and drag-and-drop on Windows, are
-  not implemented.
+- Removed attachments stay in the repository's git history.
 - Windows installer and APK are universal builds; add `--split-per-abi` to
   shrink the APK.

@@ -1,7 +1,10 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../core/image_compress.dart';
+import '../core/reminders.dart';
 import '../core/settings.dart';
 import '../core/speech.dart';
 import '../sync/background_sync.dart';
@@ -276,6 +279,66 @@ class _SettingsPageState extends State<SettingsPage> {
                     onChanged: settings.autoSync ? settings.setBackgroundSync : null,
                   ),
               ]),
+              if (context.read<ReminderService>().supported)
+                _section(context, 'Task reminders', [
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Notify when a task is due'),
+                    subtitle: Text(Platform.isAndroid
+                        ? 'Uses your phone\'s alarm service, so it works with the '
+                            'app closed. If reminders are late, allow "Alarms & '
+                            'reminders" and set Inkwell\'s battery use to '
+                            'unrestricted in Android settings.'
+                        : 'Shown while Inkwell is running, including in the system '
+                            'tray.'),
+                    value: settings.remindersEnabled,
+                    onChanged: (v) async {
+                      final reminders = context.read<ReminderService>();
+                      final messenger = ScaffoldMessenger.of(context);
+                      await settings.setRemindersEnabled(v);
+                      if (v && !await reminders.requestPermission()) {
+                        messenger.showSnackBar(const SnackBar(
+                            content: Text(
+                                'Notifications are blocked. Allow them for Inkwell in system settings.')));
+                      }
+                    },
+                  ),
+                  DropdownButtonFormField<int>(
+                    key: ValueKey('hour${settings.reminderHour}'),
+                    initialValue: settings.reminderHour,
+                    decoration: const InputDecoration(
+                        labelText: 'Time for tasks that only have a date'),
+                    items: [
+                      for (final h in [6, 7, 8, 9, 10, 12, 14, 18])
+                        DropdownMenuItem(
+                            value: h,
+                            child: Text('${h.toString().padLeft(2, '0')}:00')),
+                    ],
+                    onChanged: settings.remindersEnabled
+                        ? (v) => settings.setReminderHour(v ?? 9)
+                        : null,
+                  ),
+                ]),
+              if (Platform.isWindows)
+                _section(context, 'Windows', [
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Keep running in the system tray'),
+                    subtitle: const Text(
+                        'Closing the window hides Inkwell instead of quitting, so '
+                        'it keeps syncing and showing reminders. Use the tray icon '
+                        'menu to quit.'),
+                    value: settings.keepInTray,
+                    onChanged: settings.setKeepInTray,
+                  ),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Start with Windows'),
+                    subtitle: const Text('Starts minimised to the tray at sign-in.'),
+                    value: settings.startWithWindows,
+                    onChanged: settings.setStartWithWindows,
+                  ),
+                ]),
               _section(context, 'Photos', [
                 SegmentedButton<ImageCompression>(
                   showSelectedIcon: false,

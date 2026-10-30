@@ -7,8 +7,12 @@ import 'package:http/http.dart' as http;
 
 class TreeEntry {
   const TreeEntry(this.path, this.sha);
+
+  /// A [sha] of null deletes [path] from the new tree.
+  const TreeEntry.delete(this.path) : sha = null;
+
   final String path;
-  final String sha;
+  final String? sha;
 }
 
 class GitHubException implements Exception {
@@ -191,6 +195,7 @@ class GitHubClient {
         'base_tree': baseTree,
         'tree': [
           for (final e in entries)
+            // A null sha deletes the path from the new tree.
             {'path': e.path, 'mode': '100644', 'type': 'blob', 'sha': e.sha},
         ],
       },

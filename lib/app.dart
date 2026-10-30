@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_quill/flutter_quill.dart';
 import 'package:provider/provider.dart';
 
+import 'core/reminders.dart';
 import 'core/settings.dart';
 import 'core/store.dart';
 import 'sync/background_sync.dart';
@@ -29,7 +30,17 @@ class _InkwellAppState extends State<InkwellApp> with WidgetsBindingObserver {
     BackgroundSync.startHeartbeat(context.read<WorkerGuard>());
     _applyBackground();
     settings.addListener(_applyBackground);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _askNotificationPermission());
     WidgetsBinding.instance.addPostFrameCallback((_) => sync.maybeAutoSync());
+  }
+
+  /// Asks for notification permission once, the first time the app runs.
+  Future<void> _askNotificationPermission() async {
+    final s = context.read<AppSettings>();
+    if (!s.remindersEnabled || s.getString('reminders.asked') == '1') return;
+    await s.putString('reminders.asked', '1');
+    if (!mounted) return;
+    await context.read<ReminderService>().requestPermission();
   }
 
   void _applyBackground() {

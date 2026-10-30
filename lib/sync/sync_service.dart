@@ -31,6 +31,7 @@ class SyncReport {
     this.uploads = 0,
     this.conflicts = 0,
     this.upToDate = false,
+    this.removed = 0,
   });
 
   final int pulled;
@@ -39,14 +40,18 @@ class SyncReport {
   final int conflicts;
   final bool upToDate;
 
+  /// Abandoned attachments deleted from the repository.
+  final int removed;
+
   String describe() {
-    if (upToDate || (pulled == 0 && pushed == 0 && uploads == 0)) {
+    if (upToDate || (pulled == 0 && pushed == 0 && uploads == 0 && removed == 0)) {
       return 'Everything is up to date.';
     }
     final parts = <String>[
       if (pulled > 0) '$pulled downloaded',
       if (pushed > 0) '$pushed uploaded',
       if (uploads > 0) '$uploads attachment${uploads == 1 ? '' : 's'}',
+      if (removed > 0) '$removed unused attachment${removed == 1 ? '' : 's'} removed',
       if (conflicts > 0)
         '$conflicts conflict${conflicts == 1 ? '' : 's'} (both versions kept)',
     ];
@@ -60,6 +65,9 @@ class SyncReport {
 ///   inkwell/meta.json              salt + passphrase check
 ///   inkwell/notes/`<id>`.enc         one file per note
 ///   inkwell/blobs/`<keyed-hash>`.enc one file per attachment
+/// How long an unused attachment stays in the repository before it is deleted.
+const Duration _orphanGrace = Duration(days: 14);
+
 class SyncService extends ChangeNotifier {
   SyncService(this.store, this.settings, {this.guard});
 
@@ -207,7 +215,10 @@ class SyncService extends ChangeNotifier {
       throw SyncException(
           'Branch "${cfg.branch}" has no commits yet. Create the repository with a README, or check the branch name.');
     }
-    if (head == state.lastHead && state.dirty.isEmpty) {
+    final nowMs = DateTime.now().millisecondsSinceEpoch;
+    final cleanupDue = state.orphanSince.values
+        .any((t) => nowMs - t >= _orphanGrace.inMilliseconds);
+    if (head == state.lastHead && state.dirty.isEmpty && !cleanupDue) {
       return const SyncReport(upToDate: true);
     }
 
@@ -313,6 +324,51 @@ class SyncService extends ChangeNotifier {
       }
     }
 
+    // Repair: a note that is already synced but whose attachment is missing
+    // from the repository (for example it was lost or removed) is re-uploaded
+    // from this device when we still have the file.
+    final names = <String, String>{};
+    Future<String> nameFor(String hash) async =>
+        names[hash] ??= await vault.blobName(hash);
+    for (final n in store.all) {
+      if (state.dirty.contains(n.id)) continue;
+      for (final a in n.attachments) {
+        final name = await nameFor(a.hash);
+        if (remoteBlobs.containsKey(name) || uploadedBlobs.containsKey(name)) {
+          continue;
+        }
+        final file = store.blobFile(a.hash);
+        if (!await file.exists()) continue;
+        final enc = await vault.encrypt(await file.readAsBytes());
+        final sha = await gh.createBlob(enc);
+        uploadedBlobs[name] = sha;
+        entries.add(TreeEntry('$_blobsPrefix$name.enc', sha));
+      }
+    }
+
+    // Clean up: attachments no note uses any more (removed from a note, or
+    // the note was emptied from the trash) are deleted from the repository
+    // after a grace period, so a device that was offline can still sync its
+    // own changes. Git history keeps old versions; this only trims the
+    // current tree.
+    final referenced = <String>{};
+    for (final n in store.all) {
+      for (final a in n.attachments) {
+        referenced.add(await nameFor(a.hash));
+      }
+    }
+    state.orphanSince.removeWhere(
+        (name, _) => referenced.contains(name) || !remoteBlobs.containsKey(name));
+    final removedNames = <String>[];
+    for (final name in remoteBlobs.keys) {
+      if (referenced.contains(name) || uploadedBlobs.containsKey(name)) continue;
+      final since = state.orphanSince.putIfAbsent(name, () => nowMs);
+      if (nowMs - since >= _orphanGrace.inMilliseconds) {
+        entries.add(TreeEntry.delete('$_blobsPrefix$name.enc'));
+        removedNames.add(name);
+      }
+    }
+
     var newHead = head;
     if (entries.isNotEmpty) {
       final newTree = await gh.createTree(treeSha, entries);
@@ -337,6 +393,10 @@ class SyncService extends ChangeNotifier {
       ..clear()
       ..addAll(remoteBlobs)
       ..addAll(uploadedBlobs);
+    for (final name in removedNames) {
+      state.blobShas.remove(name);
+      state.orphanSince.remove(name);
+    }
     state.lastHead = newHead;
     await store.saveState();
 
@@ -345,6 +405,7 @@ class SyncService extends ChangeNotifier {
       pushed: pushIds.length,
       uploads: uploadedBlobs.length,
       conflicts: conflicts,
+      removed: removedNames.length,
     );
   }
 

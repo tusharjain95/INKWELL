@@ -1,9 +1,13 @@
 import 'dart:io';
 
+import 'package:desktop_drop/desktop_drop.dart';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../core/models.dart';
+import '../core/reminders.dart';
+import '../core/share_intake.dart';
 import '../core/store.dart';
 import '../sync/sync_service.dart';
 import '../sync/update_service.dart';
@@ -36,10 +40,61 @@ class _NotesPageState extends State<NotesPage> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) => _checkUpdate());
+    final reminders = context.read<ReminderService>();
+    reminders.openNote.addListener(_openFromNotification);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _openFromNotification());
+    final intake = context.read<ShareIntake>();
+    intake.openNote.addListener(_openShared);
+    intake.warning.addListener(_showShareWarning);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _openShared());
+  }
+
+  bool _dragging = false;
+
+  void _openShared() {
+    if (!mounted) return;
+    final intake = context.read<ShareIntake>();
+    final id = intake.openNote.value;
+    if (id == null) return;
+    intake.openNote.value = null;
+    if (context.read<NoteStore>().byId(id) == null) return;
+    if (_trash) setState(() => _trash = false);
+    _open(id, MediaQuery.sizeOf(context).width >= _kWide);
+  }
+
+  void _showShareWarning() {
+    if (!mounted) return;
+    final intake = context.read<ShareIntake>();
+    final msg = intake.warning.value;
+    if (msg == null) return;
+    intake.warning.value = null;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+  }
+
+  Future<void> _dropped(List<String> paths) async {
+    final files = [for (final p in paths) File(p)]
+        .where((f) => FileSystemEntity.typeSync(f.path) == FileSystemEntityType.file)
+        .toList();
+    if (files.isEmpty) return;
+    await context.read<ShareIntake>().createNoteFrom(files: files);
+  }
+
+  void _openFromNotification() {
+    if (!mounted) return;
+    final reminders = context.read<ReminderService>();
+    final id = reminders.openNote.value;
+    if (id == null) return;
+    reminders.openNote.value = null;
+    if (context.read<NoteStore>().byId(id) == null) return;
+    _open(id, MediaQuery.sizeOf(context).width >= _kWide);
   }
 
   @override
   void dispose() {
+    context.read<ReminderService>().openNote.removeListener(_openFromNotification);
+    final intake = context.read<ShareIntake>();
+    intake.openNote.removeListener(_openShared);
+    intake.warning.removeListener(_showShareWarning);
     _searchCtl.dispose();
     super.dispose();
   }
@@ -193,7 +248,7 @@ class _NotesPageState extends State<NotesPage> {
                 ),
               ],
             ),
-      body: wide
+      body: _withDrop(wide
           ? Row(
               children: [
                 SizedBox(width: 380, child: _buildList(context, store, wide)),
@@ -209,7 +264,42 @@ class _NotesPageState extends State<NotesPage> {
                 ),
               ],
             )
-          : _buildList(context, store, wide),
+          : _buildList(context, store, wide)),
+    );
+  }
+
+  /// Windows: drop files onto the window to make a note with them attached.
+  Widget _withDrop(Widget child) {
+    if (!Platform.isWindows) return child;
+    final cs = Theme.of(context).colorScheme;
+    return DropTarget(
+      onDragEntered: (_) => setState(() => _dragging = true),
+      onDragExited: (_) => setState(() => _dragging = false),
+      onDragDone: (d) {
+        setState(() => _dragging = false);
+        _dropped([for (final f in d.files) f.path]);
+      },
+      child: Stack(
+        children: [
+          Positioned.fill(child: child),
+          if (_dragging)
+            Positioned.fill(
+              child: IgnorePointer(
+                child: Container(
+                  color: cs.primary.withValues(alpha: 0.12),
+                  alignment: Alignment.center,
+                  child: Card(
+                    child: Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: Text('Drop to create a note with these files',
+                          style: Theme.of(context).textTheme.titleMedium),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
     );
   }
 

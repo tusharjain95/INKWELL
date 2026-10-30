@@ -94,6 +94,79 @@ void _patchAndroid() {
     stdout.writeln('Patched AndroidManifest.xml for voice input');
   }
 
+  // --- manifest: reminders (notifications, exact alarms, reboot) -------------
+  m = manifest.readAsStringSync();
+  if (!m.contains('inkwell-patched-notify')) {
+    const perms = '''
+    <!-- inkwell-patched-notify -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM"/>
+    <uses-permission android:name="android.permission.VIBRATE"/>
+''';
+    const receivers = '''
+        <receiver android:exported="false"
+            android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationReceiver"/>
+        <receiver android:exported="false"
+            android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationBootReceiver">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED"/>
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED"/>
+                <action android:name="android.intent.action.QUICKBOOT_POWERON"/>
+                <action android:name="com.htc.intent.action.QUICKBOOT_POWERON"/>
+            </intent-filter>
+        </receiver>
+''';
+    m = m.replaceFirstMapped(
+      RegExp(r'<manifest[^>]*>'),
+      (match) => '${match[0]}\n$perms',
+    );
+    m = m.replaceFirst('</application>', '$receivers    </application>');
+    manifest.writeAsStringSync(m);
+    stdout.writeln('Patched AndroidManifest.xml for reminders');
+  }
+
+  // --- manifest: receive shared text / images / files -----------------------
+  m = manifest.readAsStringSync();
+  if (!m.contains('inkwell-patched-share')) {
+    const filters = '''
+            <!-- inkwell-patched-share -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <data android:mimeType="text/*"/>
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <data android:mimeType="image/*"/>
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <data android:mimeType="application/pdf"/>
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND_MULTIPLE"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <data android:mimeType="image/*"/>
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND_MULTIPLE"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <data android:mimeType="*/*"/>
+            </intent-filter>
+''';
+    final act = RegExp(r'</activity>');
+    if (act.hasMatch(m)) {
+      m = m.replaceFirst('</activity>', '$filters        </activity>');
+      manifest.writeAsStringSync(m);
+      stdout.writeln('Patched AndroidManifest.xml for sharing');
+    } else {
+      stderr.writeln('warning: no </activity> in manifest; share-to-Inkwell not added');
+    }
+  }
+
   // --- gradle: compile every plugin against a recent Android API ---------------
   _patchPluginCompileSdk();
 
@@ -187,6 +260,23 @@ if (keystorePropertiesFile.exists()) {
     'signingConfig = if (keystorePropertiesFile.exists()) '
         'signingConfigs.getByName("release") else signingConfigs.getByName("debug")',
   );
+  // flutter_local_notifications needs core library desugaring.
+  if (!s.contains('isCoreLibraryDesugaringEnabled')) {
+    final co = RegExp(r'compileOptions\s*\{');
+    if (co.hasMatch(s)) {
+      s = s.replaceFirstMapped(
+          co, (m) => '${m[0]}\n        isCoreLibraryDesugaringEnabled = true');
+      s += '''
+
+dependencies {
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
+}
+''';
+    } else {
+      stderr.writeln('warning: no compileOptions block found in ${f.path}; '
+          'enable core library desugaring manually (see flutter_local_notifications).');
+    }
+  }
   // Secure storage and file pickers need API 23+; 24 keeps things simple.
   s = s.replaceAll(
     RegExp(r'minSdk\s*=\s*flutter\.minSdkVersion'),

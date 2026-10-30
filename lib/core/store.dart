@@ -45,9 +45,11 @@ class SyncState {
     Map<String, String>? blobShas,
     Set<String>? dirty,
     this.lastSyncAt,
+    Map<String, int>? orphanSince,
   })  : noteShas = noteShas ?? {},
         blobShas = blobShas ?? {},
-        dirty = dirty ?? {};
+        dirty = dirty ?? {},
+        orphanSince = orphanSince ?? {};
 
   /// Commit we last synced against.
   String? lastHead;
@@ -62,12 +64,17 @@ class SyncState {
   final Set<String> dirty;
   int? lastSyncAt;
 
+  /// Remote attachment name -> when sync first saw that no note uses it.
+  /// Used to delete abandoned attachments after a grace period.
+  final Map<String, int> orphanSince;
+
   Map<String, dynamic> toJson() => {
         'lastHead': lastHead,
         'noteShas': noteShas,
         'blobShas': blobShas,
         'dirty': dirty.toList(),
         'lastSyncAt': lastSyncAt,
+        'orphanSince': orphanSince,
       };
 
   factory SyncState.fromJson(Map<String, dynamic> j) => SyncState(
@@ -76,6 +83,8 @@ class SyncState {
         blobShas: ((j['blobShas'] as Map?) ?? const {}).cast<String, String>(),
         dirty: ((j['dirty'] as List?) ?? const []).cast<String>().toSet(),
         lastSyncAt: (j['lastSyncAt'] as num?)?.toInt(),
+        orphanSince: (((j['orphanSince'] as Map?) ?? const {}).cast<String, num>())
+            .map((k, v) => MapEntry(k, v.toInt())),
       );
 }
 

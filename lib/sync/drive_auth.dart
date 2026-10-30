@@ -104,12 +104,20 @@ class DriveAuth {
       if (DateTime.now().isAfter(code.expiresAt)) {
         throw DriveAuthException('The code expired. Start sign-in again.');
       }
-      final r = await _post(_tokenUri, {
-        'client_id': clientId,
-        'client_secret': clientSecret,
-        'device_code': code.deviceCode,
-        'grant_type': 'urn:ietf:params:oauth:grant-type:device_code',
-      });
+      http.Response r;
+      try {
+        r = await _post(_tokenUri, {
+          'client_id': clientId,
+          'client_secret': clientSecret,
+          'device_code': code.deviceCode,
+          'grant_type': 'urn:ietf:params:oauth:grant-type:device_code',
+        });
+      } on DriveAuthException {
+        // The phone's network often drops for a moment while the user is in the
+        // browser (the app is in the background). The code stays valid, so keep
+        // trying until it expires instead of giving up.
+        continue;
+      }
       final j = _json(r);
       if (r.statusCode == 200 && j['access_token'] != null) {
         final refresh = j['refresh_token'] as String?;

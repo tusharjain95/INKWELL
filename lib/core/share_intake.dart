@@ -2,8 +2,8 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
-import 'package:receive_sharing_intent/receive_sharing_intent.dart';
 
 import 'models.dart';
 import 'nlp.dart';
@@ -24,50 +24,36 @@ class ShareIntake {
   /// Notes about files that could not be added (too large, unreadable).
   final ValueNotifier<String?> warning = ValueNotifier<String?>(null);
 
-  StreamSubscription<List<SharedMediaFile>>? _sub;
+  static const MethodChannel _channel = MethodChannel('inkwell/share');
 
   /// Starts listening for shares (Android). Safe to call on other platforms.
+  /// The native side is a small handler in MainActivity (added by
+  /// tool/bootstrap.dart) that copies shared content into the app's cache.
   Future<void> start() async {
     if (!Platform.isAndroid) return;
+    _channel.setMethodCallHandler((call) async {
+      if (call.method == 'shared') await _handle(call.arguments);
+      return null;
+    });
     try {
-      final initial = await ReceiveSharingIntent.instance.getInitialMedia();
-      if (initial.isNotEmpty) await _handle(initial);
-      ReceiveSharingIntent.instance.reset();
-      _sub = ReceiveSharingIntent.instance.getMediaStream().listen(
-        (items) async {
-          await _handle(items);
-          ReceiveSharingIntent.instance.reset();
-        },
-        onError: (Object e) => debugPrint('Share receive error: $e'),
-      );
+      await _handle(await _channel.invokeMethod<Object?>('getInitial'));
     } catch (e) {
       debugPrint('Sharing is unavailable: $e');
     }
   }
 
   void dispose() {
-    _sub?.cancel();
     openNote.dispose();
     warning.dispose();
   }
 
-  Future<void> _handle(List<SharedMediaFile> items) async {
-    final texts = <String>[];
-    final files = <File>[];
-    for (final it in items) {
-      if (it.type == SharedMediaType.text || it.type == SharedMediaType.url) {
-        if (it.path.trim().isNotEmpty) texts.add(it.path.trim());
-      } else if (it.path.isNotEmpty) {
-        files.add(File(it.path));
-      }
-    }
-    final text = [
-      ...texts,
-      for (final it in items)
-        if (it.message != null && it.message!.trim().isNotEmpty &&
-            it.type != SharedMediaType.text && it.type != SharedMediaType.url)
-          it.message!.trim(),
-    ].join('\n\n');
+  Future<void> _handle(Object? data) async {
+    if (data is! Map) return;
+    final text = (data['text'] as String?) ?? '';
+    final files = <File>[
+      for (final path in (data['files'] as List?) ?? const [])
+        if (path is String && path.isNotEmpty) File(path),
+    ];
     await createNoteFrom(text: text, files: files);
   }
 

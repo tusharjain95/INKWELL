@@ -167,6 +167,9 @@ void _patchAndroid() {
     }
   }
 
+  // --- native: hand shared text / files to Flutter -----------------------------
+  _patchMainActivity();
+
   // --- gradle: compile every plugin against a recent Android API ---------------
   _patchPluginCompileSdk();
 
@@ -181,6 +184,123 @@ void _patchAndroid() {
     stderr.writeln('error: no android/app/build.gradle(.kts) found');
     exit(1);
   }
+}
+
+/// Replaces the generated MainActivity with one that receives Android share
+/// intents (text, links, images, files), copies shared files into the app cache
+/// and passes them to Dart over the "inkwell/share" channel.
+void _patchMainActivity() {
+  final root = Directory('android/app/src/main');
+  File? target;
+  if (root.existsSync()) {
+    for (final e in root.listSync(recursive: true)) {
+      if (e is File && e.path.endsWith('MainActivity.kt')) target = e;
+    }
+  }
+  if (target == null) {
+    stderr.writeln('warning: MainActivity.kt not found; share-to-Inkwell not added');
+    return;
+  }
+  var src = target.readAsStringSync();
+  if (src.contains('inkwell-share')) return;
+  final pkg = RegExp(r'^\s*package\s+([\w.]+)', multiLine: true).firstMatch(src)?.group(1);
+  if (pkg == null) {
+    stderr.writeln('warning: no package line in ${target.path}; share not added');
+    return;
+  }
+  target.writeAsStringSync('''
+// inkwell-share: receives Android share intents and passes them to Dart
+package $pkg
+
+import android.content.Intent
+import android.net.Uri
+import android.os.Handler
+import android.os.Looper
+import android.provider.OpenableColumns
+import io.flutter.embedding.android.FlutterActivity
+import io.flutter.embedding.engine.FlutterEngine
+import io.flutter.plugin.common.MethodChannel
+import java.io.File
+import kotlin.concurrent.thread
+
+class MainActivity : FlutterActivity() {
+    private var channel: MethodChannel? = null
+    private val main = Handler(Looper.getMainLooper())
+
+    override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
+        super.configureFlutterEngine(flutterEngine)
+        val ch = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "inkwell/share")
+        channel = ch
+        ch.setMethodCallHandler { call, result ->
+            if (call.method == "getInitial") {
+                val i = intent
+                if (i == null || !isShare(i)) {
+                    result.success(null)
+                } else {
+                    extract(i) { data -> result.success(data) }
+                }
+            } else {
+                result.notImplemented()
+            }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (isShare(intent)) {
+            extract(intent) { data -> channel?.invokeMethod("shared", data) }
+        }
+    }
+
+    private fun isShare(i: Intent) =
+        i.action == Intent.ACTION_SEND || i.action == Intent.ACTION_SEND_MULTIPLE
+
+    /** Copies shared streams to the cache off the main thread, then calls back on it. */
+    @Suppress("DEPRECATION")
+    private fun extract(i: Intent, done: (Map<String, Any?>?) -> Unit) {
+        val text = listOfNotNull(
+            i.getStringExtra(Intent.EXTRA_SUBJECT),
+            i.getStringExtra(Intent.EXTRA_TEXT)
+        ).filter { it.isNotBlank() }.joinToString("\\n")
+        val uris = ArrayList<Uri>()
+        if (i.action == Intent.ACTION_SEND) {
+            (i.getParcelableExtra<Uri>(Intent.EXTRA_STREAM))?.let { uris.add(it) }
+        } else {
+            i.getParcelableArrayListExtra<Uri>(Intent.EXTRA_STREAM)?.let { uris.addAll(it) }
+        }
+        i.action = null // consume, so a rotation does not re-import it
+        thread {
+            val files = ArrayList<String>()
+            val dir = File(cacheDir, "shared").apply { mkdirs() }
+            for (u in uris) {
+                try {
+                    val name = displayName(u) ?: "shared-" + System.currentTimeMillis()
+                    val out = File(dir, System.currentTimeMillis().toString() + "-" + name)
+                    contentResolver.openInputStream(u)?.use { input ->
+                        out.outputStream().use { input.copyTo(it) }
+                    }
+                    if (out.exists()) files.add(out.absolutePath)
+                } catch (e: Exception) {
+                    // skip unreadable items
+                }
+            }
+            main.post { done(mapOf("text" to text, "files" to files)) }
+        }
+    }
+
+    private fun displayName(u: Uri): String? {
+        try {
+            contentResolver.query(u, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
+                if (it.moveToFirst()) return it.getString(0)
+            }
+        } catch (e: Exception) {
+        }
+        return u.lastPathSegment
+    }
+}
+''');
+  stdout.writeln('Patched MainActivity.kt for sharing');
 }
 
 /// Some plugins (file_picker, open_filex, ...) still compile against an old

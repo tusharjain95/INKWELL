@@ -106,6 +106,10 @@ jobs:
       - run: flutter pub get
 
       - name: Build Windows app
+        env:
+          # The notifications plugin uses <experimental/coroutine>, which the
+          # newest MSVC turns into a hard error unless silenced.
+          CL: /D_SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS
         run: >
           flutter build windows --release
           --build-name=${{ needs.meta.outputs.name }}

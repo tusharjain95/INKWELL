@@ -33,7 +33,7 @@ dependencies:
 
   # reminders, share-in, Windows tray
   flutter_local_notifications: ^21.0.0
-  timezone: ^0.10.0
+  timezone: ^0.11.0
   receive_sharing_intent: ^1.8.1
   desktop_drop: ^0.8.1
   window_manager: ^0.5.0

@@ -488,7 +488,18 @@ class _SettingsPageState extends State<SettingsPage> {
                     ),
                   ),
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: 4),
+                Consumer<SyncService>(
+                  builder: (context, sync, _) => Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton.icon(
+                      onPressed: (!sync.configured || sync.running) ? null : sync.fullResync,
+                      icon: const Icon(Icons.manage_search),
+                      label: const Text('Re-check everything'),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 4),
                 Consumer<SyncService>(
                   builder: (context, sync, _) {
                     final when = sync.lastSyncAt;

@@ -13,6 +13,7 @@ class SyncReport {
     this.conflicts = 0,
     this.upToDate = false,
     this.removed = 0,
+    this.remoteNotes,
   });
 
   final int pulled;
@@ -20,6 +21,9 @@ class SyncReport {
   final int uploads;
   final int conflicts;
   final bool upToDate;
+
+  /// How many notes the cloud holds after this sync, when the provider can tell.
+  final int? remoteNotes;
 
   /// Abandoned attachments deleted from the repository.
   final int removed;

@@ -42,8 +42,19 @@ class DriveSync {
   String? _vaultMd5;
   String? _vaultPass;
 
-  DriveClient _client() =>
-      DriveClient(DriveTokenSource(_auth, settings.driveRefreshToken));
+  DriveClient? _cachedClient;
+  String? _cachedFor;
+
+  /// One client per sign-in, so the access token and the folder id are reused
+  /// instead of being looked up again on every sync.
+  DriveClient _client() {
+    final token = settings.driveRefreshToken;
+    if (_cachedClient == null || _cachedFor != token) {
+      _cachedClient = DriveClient(DriveTokenSource(_auth, token));
+      _cachedFor = token;
+    }
+    return _cachedClient!;
+  }
 
   /// Checks the sign-in and passphrase without changing anything.
   Future<String> verify(String passphrase, {DriveClient? client}) async {
@@ -59,6 +70,15 @@ class DriveSync {
   }
 
   Future<SyncReport> syncOnce({DriveClient? client}) async {
+    try {
+      return await _syncOnce(client: client);
+    } on DriveException {
+      if (client == null) _cachedClient = null; // re-find the folder next time
+      rethrow;
+    }
+  }
+
+  Future<SyncReport> _syncOnce({DriveClient? client}) async {
     final c = client ?? _client();
     final state = store.state;
     final nowMs = DateTime.now().millisecondsSinceEpoch;
@@ -70,7 +90,11 @@ class DriveSync {
         state.orphanSince.values.any((t) => nowMs - t >= kOrphanGrace.inMilliseconds);
     final signature = await _signature(byName);
     if (signature == state.lastHead && state.dirty.isEmpty && !cleanupDue) {
-      return const SyncReport(upToDate: true);
+      return SyncReport(
+          upToDate: true,
+          remoteNotes: byName.keys
+              .where((n) => n.startsWith(_notePrefix) && n.endsWith(_ext))
+              .length);
     }
 
     final remoteNotes = <String, DriveFile>{};
@@ -138,6 +162,7 @@ class DriveSync {
     // ---- push: encrypt and upload every dirty note -------------------------
     final pushed = <String, String>{}; // id -> new md5
     final pushedAt = <String, int>{};
+    final created = <String, DriveFile>{}; // note files this sync created
     for (final id in state.dirty.toList()) {
       final n = store.byId(id)!;
       final enc = await vault.encrypt(utf8.encode(jsonEncode(n.toJson())));
@@ -150,9 +175,31 @@ class DriveSync {
         pushed[id] = (await c.update(existing.id, enc)).md5;
       } else {
         pushedAt[id] = n.updatedAt.millisecondsSinceEpoch;
-        pushed[id] = (await c.create('$_notePrefix$id$_ext', enc)).md5;
+        final file = await c.create('$_notePrefix$id$_ext', enc);
+        created[id] = file;
+        pushed[id] = file.md5;
       }
       wrote = true;
+    }
+
+    // Two devices can create the same note file at the same moment (typically
+    // right after both switched to Drive). Drive keeps both, and the oldest
+    // wins. If ours lost, remove it now and keep the note dirty without a
+    // remembered version, so the next sync merges it with the winner instead
+    // of silently replacing our newer edit later.
+    var lostRace = 0;
+    if (created.isNotEmpty) {
+      final again = _byName(await c.list()).winners;
+      for (final e in created.entries) {
+        final winner = again['$_notePrefix${e.key}$_ext'];
+        if (winner != null && winner.id != e.value.id) {
+          await c.delete(e.value.id);
+          pushed.remove(e.key);
+          pushedAt.remove(e.key);
+          state.noteShas.remove(e.key);
+          lostRace++;
+        }
+      }
     }
 
     // ---- attachments: upload what the repository lacks ----------------------
@@ -232,6 +279,7 @@ class DriveSync {
       uploads: uploaded.length,
       conflicts: conflicts,
       removed: removed.length,
+      remoteNotes: remoteNotes.length + created.length - lostRace,
     );
   }
 

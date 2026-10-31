@@ -57,6 +57,18 @@ class SyncService extends ChangeNotifier {
   bool get configured => settings.syncReady;
 
   bool get _usesDrive => settings.syncProvider == SyncProvider.drive;
+
+  String get providerLabel => _usesDrive
+      ? (settings.driveEmail.isEmpty ? 'Google Drive' : 'Google Drive (${settings.driveEmail})')
+      : 'GitHub';
+
+  /// Forgets what was last synced and compares every note with the cloud again.
+  /// Safe: the newest edit wins and a real conflict keeps both versions.
+  Future<void> fullResync() async {
+    if (running) return;
+    await store.resetSyncBaseline();
+    await syncNow();
+  }
   late final DriveSync _drive = DriveSync(store, settings);
 
   /// Checks a Google Drive sign-in and passphrase without changing anything.
@@ -174,7 +186,12 @@ class SyncService extends ChangeNotifier {
       final done = report ?? const SyncReport(upToDate: true);
       store.state.lastSyncAt = DateTime.now().millisecondsSinceEpoch;
       await store.saveState();
-      lastMessage = done.describe();
+      final remote = done.remoteNotes;
+      lastMessage = [
+        providerLabel,
+        done.describe(),
+        if (remote != null) 'cloud $remote notes, this device ${store.all.length}',
+      ].join(' · ');
       return done;
     } on GitHubException catch (e) {
       lastError = e.message;

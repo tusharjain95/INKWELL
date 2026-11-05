@@ -1,4 +1,3 @@
-import 'package:dynamic_color/dynamic_color.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_quill/flutter_quill.dart';
 import 'package:provider/provider.dart';
@@ -82,23 +81,15 @@ class _InkwellAppState extends State<InkwellApp> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) {
     final mode = context.select<AppSettings, ThemeMode>((s) => s.themeMode);
-    return DynamicColorBuilder(
-      builder: (lightDynamic, darkDynamic) {
-        final light = lightDynamic ??
-            ColorScheme.fromSeed(seedColor: kSeedColor, brightness: Brightness.light);
-        final dark = darkDynamic ??
-            ColorScheme.fromSeed(seedColor: kSeedColor, brightness: Brightness.dark);
-        return MaterialApp(
-          title: 'Inkwell',
-          debugShowCheckedModeBanner: false,
-          themeMode: mode,
-          theme: buildTheme(light),
-          darkTheme: buildTheme(dark),
-          localizationsDelegates: FlutterQuillLocalizations.localizationsDelegates,
-          supportedLocales: FlutterQuillLocalizations.supportedLocales,
-          home: const NotesPage(),
-        );
-      },
+    return MaterialApp(
+      title: 'Inkwell',
+      debugShowCheckedModeBanner: false,
+      themeMode: mode,
+      theme: buildTheme(inkwellScheme(Brightness.light)),
+      darkTheme: buildTheme(inkwellScheme(Brightness.dark)),
+      localizationsDelegates: FlutterQuillLocalizations.localizationsDelegates,
+      supportedLocales: FlutterQuillLocalizations.supportedLocales,
+      home: const NotesPage(),
     );
   }
 }

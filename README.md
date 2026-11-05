@@ -203,6 +203,8 @@ messages overnight. A task marked `!1` still reminds you at its due time.
 
 ## Home-screen widgets and PDF export
 
+**Look.** The interface follows an Evernote-style layout: a dark sidebar (Notes, Tasks, Today, Trash, tags, sync, settings), a note list with title, preview, date and thumbnail, and the editor on the right on Windows and wide tablets. On phones the sidebar is a drawer, with a Notes / Tasks / Today bar at the bottom and a green + button.
+
 **Widgets (Android).** Long-press the home screen, choose Widgets, and add
 **Inkwell tasks** (open tasks, overdue first, then soonest due; a coloured dot
 shows priority and red text marks overdue) or **Inkwell notes** (pinned first,

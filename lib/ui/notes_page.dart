@@ -16,6 +16,7 @@ import 'export_flow.dart';
 import 'format.dart';
 import 'quick_add.dart';
 import 'task_bar.dart';
+import 'theme.dart';
 import 'settings_page.dart';
 import 'update_dialog.dart';
 
@@ -169,6 +170,21 @@ class _NotesPageState extends State<NotesPage> {
     ));
   }
 
+  final GlobalKey<ScaffoldState> _scaffold = GlobalKey<ScaffoldState>();
+
+  String get _heading {
+    if (_trash) return 'Trash';
+    if (_tag != null) return '#$_tag';
+    switch (_view) {
+      case NoteView.all:
+        return 'Notes';
+      case NoteView.tasks:
+        return 'Tasks';
+      case NoteView.today:
+        return 'Today';
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final store = context.watch<NoteStore>();
@@ -179,68 +195,40 @@ class _NotesPageState extends State<NotesPage> {
         ? _selectedId
         : null;
 
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(_trash ? 'Trash' : 'Inkwell',
-            style: const TextStyle(fontWeight: FontWeight.w700)),
-        actions: [
-          Consumer<SyncService>(
-            builder: (context, sync, _) {
-              final Widget icon;
-              if (sync.running) {
-                icon = const SizedBox(
-                  width: 20,
-                  height: 20,
-                  child: CircularProgressIndicator(strokeWidth: 2.4),
-                );
-              } else if (!sync.configured) {
-                icon = const Icon(Icons.cloud_off_outlined);
-              } else if (sync.lastError != null) {
-                icon = Icon(Icons.sync_problem_outlined, color: cs.error);
-              } else if (store.state.dirty.isNotEmpty) {
-                icon = Icon(Icons.cloud_upload_outlined, color: cs.primary);
-              } else {
-                icon = const Icon(Icons.cloud_done_outlined);
-              }
-              return IconButton(
-                tooltip: sync.running
-                    ? 'Syncing…'
-                    : !sync.configured
-                        ? 'Set up sync'
-                        : (sync.lastError ??
-                            (store.state.dirty.isEmpty
-                                ? 'Sync now'
-                                : '${store.state.dirty.length} change(s) waiting to upload. Tap to sync now.')),
-                icon: icon,
-                onPressed: sync.running ? null : _syncPressed,
-              );
-            },
-          ),
-          if (!_trash)
-            IconButton(
-              tooltip: _view == NoteView.all
-                  ? 'Export notes as PDF'
-                  : 'Export tasks as PDF',
-              icon: const Icon(Icons.picture_as_pdf_outlined),
-              onPressed: _exportVisible,
+    if (wide) {
+      return Scaffold(
+        key: _scaffold,
+        body: _withDrop(Row(
+          children: [
+            SizedBox(width: 244, child: _sidebar(context, store, drawer: false)),
+            SizedBox(width: 372, child: _buildList(context, store, wide)),
+            VerticalDivider(width: 1, color: cs.outlineVariant),
+            Expanded(
+              child: selected != null
+                  ? EditorPane(
+                      key: ValueKey(selected),
+                      noteId: selected,
+                      onClose: () => setState(() => _selectedId = null),
+                    )
+                  : const _EmptyDetail(),
             ),
-          IconButton(
-            tooltip: _trash ? 'Back to notes' : 'Trash',
-            icon: Icon(_trash ? Icons.notes : Icons.delete_outline),
-            onPressed: () => setState(() {
-              _trash = !_trash;
-              _selectedId = null;
-            }),
-          ),
-          IconButton(
-            tooltip: 'Settings',
-            icon: const Icon(Icons.settings_outlined),
-            onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute<void>(builder: (_) => const SettingsPage())),
-          ),
-          const SizedBox(width: 4),
-        ],
+          ],
+        )),
+      );
+    }
+
+    final tab = switch (_view) {
+      NoteView.all => 0,
+      NoteView.tasks => 1,
+      NoteView.today => 2,
+    };
+    return Scaffold(
+      key: _scaffold,
+      drawer: Drawer(
+        backgroundColor: kSidebarBg,
+        child: _sidebar(context, store, drawer: true),
       ),
+      body: _withDrop(SafeArea(bottom: false, child: _buildList(context, store, wide))),
       floatingActionButton: _trash
           ? null
           : Column(
@@ -250,37 +238,233 @@ class _NotesPageState extends State<NotesPage> {
                 FloatingActionButton.small(
                   heroTag: 'quick-add',
                   tooltip: 'Quick add (type or speak)',
+                  backgroundColor: cs.surface,
+                  foregroundColor: cs.primary,
                   onPressed: () => _quickAdd(listen: true),
                   child: const Icon(Icons.mic),
                 ),
                 const SizedBox(height: 12),
-                FloatingActionButton.extended(
+                FloatingActionButton(
                   heroTag: 'new-note',
+                  tooltip: _view == NoteView.all ? 'New note' : 'New task',
+                  shape: const CircleBorder(),
                   onPressed: _newNote,
-                  icon: const Icon(Icons.edit_outlined),
-                  label: Text(_view == NoteView.all ? 'New note' : 'New task'),
+                  child: const Icon(Icons.add, size: 30),
                 ),
               ],
             ),
-      body: _withDrop(wide
-          ? Row(
-              children: [
-                SizedBox(width: 380, child: _buildList(context, store, wide)),
-                const VerticalDivider(width: 1),
-                Expanded(
-                  child: selected != null
-                      ? EditorPane(
-                          key: ValueKey(selected),
-                          noteId: selected,
-                          onClose: () => setState(() => _selectedId = null),
-                        )
-                      : const _EmptyDetail(),
-                ),
+      bottomNavigationBar: _trash
+          ? null
+          : NavigationBar(
+              selectedIndex: tab,
+              onDestinationSelected: (i) => setState(() {
+                _view = const [NoteView.all, NoteView.tasks, NoteView.today][i];
+                _tag = null;
+              }),
+              destinations: [
+                const NavigationDestination(
+                    icon: Icon(Icons.description_outlined),
+                    selectedIcon: Icon(Icons.description),
+                    label: 'Notes'),
+                NavigationDestination(
+                    icon: _badge(Icons.check_circle_outline, store.openTaskCount),
+                    selectedIcon: _badge(Icons.check_circle, store.openTaskCount),
+                    label: 'Tasks'),
+                NavigationDestination(
+                    icon: _badge(Icons.today_outlined, store.dueTodayCount),
+                    selectedIcon: _badge(Icons.today, store.dueTodayCount),
+                    label: 'Today'),
               ],
-            )
-          : _buildList(context, store, wide)),
+            ),
     );
   }
+
+  Widget _badge(IconData icon, int n) =>
+      n > 0 ? Badge(label: Text('$n'), child: Icon(icon)) : Icon(icon);
+
+  // ----------------------------------------------------------------- sidebar
+
+  /// The dark navigation panel: permanent on wide screens, a drawer on phones.
+  Widget _sidebar(BuildContext context, NoteStore store, {required bool drawer}) {
+    final tags = store.allTags.toList()..sort();
+
+    void go(VoidCallback f) {
+      setState(() {
+        f();
+        _selectedId = null;
+      });
+      if (drawer) Navigator.of(context).pop();
+    }
+
+    return Container(
+      color: kSidebarBg,
+      child: SafeArea(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 18, 16, 14),
+              child: Row(
+                children: [
+                  Container(
+                    width: 30,
+                    height: 30,
+                    decoration: BoxDecoration(
+                      color: kGreen,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Icon(Icons.edit_note, color: Colors.white, size: 20),
+                  ),
+                  const SizedBox(width: 10),
+                  const Text('Inkwell',
+                      style: TextStyle(
+                          color: kOnSidebar,
+                          fontSize: 19,
+                          fontWeight: FontWeight.w700)),
+                ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 0, 14, 12),
+              child: FilledButton.icon(
+                style: FilledButton.styleFrom(
+                  backgroundColor: kGreen,
+                  foregroundColor: Colors.white,
+                  minimumSize: const Size.fromHeight(44),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
+                ),
+                onPressed: () {
+                  if (drawer) Navigator.of(context).pop();
+                  _newNote();
+                },
+                icon: const Icon(Icons.add),
+                label: Text(_view == NoteView.all ? 'New note' : 'New task'),
+              ),
+            ),
+            _NavItem(
+              icon: Icons.mic_none,
+              label: 'Quick add',
+              onTap: () {
+                if (drawer) Navigator.of(context).pop();
+                _quickAdd(listen: true);
+              },
+            ),
+            const SizedBox(height: 6),
+            _NavItem(
+              icon: Icons.description_outlined,
+              label: 'Notes',
+              selected: !_trash && _tag == null && _view == NoteView.all,
+              onTap: () => go(() {
+                _trash = false;
+                _tag = null;
+                _view = NoteView.all;
+              }),
+            ),
+            _NavItem(
+              icon: Icons.check_circle_outline,
+              label: 'Tasks',
+              count: store.openTaskCount,
+              selected: !_trash && _tag == null && _view == NoteView.tasks,
+              onTap: () => go(() {
+                _trash = false;
+                _tag = null;
+                _view = NoteView.tasks;
+              }),
+            ),
+            _NavItem(
+              icon: Icons.today_outlined,
+              label: 'Today',
+              count: store.dueTodayCount,
+              selected: !_trash && _tag == null && _view == NoteView.today,
+              onTap: () => go(() {
+                _trash = false;
+                _tag = null;
+                _view = NoteView.today;
+              }),
+            ),
+            _NavItem(
+              icon: Icons.delete_outline,
+              label: 'Trash',
+              selected: _trash,
+              onTap: () => go(() {
+                _trash = true;
+                _tag = null;
+              }),
+            ),
+            const Padding(
+              padding: EdgeInsets.fromLTRB(20, 16, 20, 6),
+              child: Text('TAGS',
+                  style: TextStyle(
+                      color: kMutedOnSidebar,
+                      fontSize: 11,
+                      letterSpacing: 1.2,
+                      fontWeight: FontWeight.w600)),
+            ),
+            Expanded(
+              child: tags.isEmpty
+                  ? const Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 20),
+                      child: Text('Add #tags to notes to find them here.',
+                          style: TextStyle(color: kMutedOnSidebar, fontSize: 12.5)),
+                    )
+                  : ListView(
+                      padding: EdgeInsets.zero,
+                      children: [
+                        for (final t in tags)
+                          _NavItem(
+                            icon: Icons.sell_outlined,
+                            label: t,
+                            selected: !_trash && _tag == t,
+                            onTap: () => go(() {
+                              _trash = false;
+                              _view = NoteView.all;
+                              _tag = t;
+                            }),
+                          ),
+                      ],
+                    ),
+            ),
+            const Divider(height: 1, color: Color(0x22FFFFFF)),
+            Consumer<SyncService>(
+              builder: (context, sync, _) {
+                final (icon, label, err) = _syncInfo(sync, store);
+                return _NavItem(
+                  icon: icon,
+                  label: label,
+                  error: err,
+                  onTap: sync.running ? () {} : _syncPressed,
+                );
+              },
+            ),
+            _NavItem(
+              icon: Icons.settings_outlined,
+              label: 'Settings',
+              onTap: () {
+                if (drawer) Navigator.of(context).pop();
+                Navigator.of(context).push(
+                    MaterialPageRoute<void>(builder: (_) => const SettingsPage()));
+              },
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
+  (IconData, String, bool) _syncInfo(SyncService sync, NoteStore store) {
+    if (sync.running) return (Icons.sync, 'Syncing…', false);
+    if (!sync.configured) return (Icons.cloud_off_outlined, 'Set up sync', false);
+    if (sync.lastError != null) {
+      return (Icons.sync_problem_outlined, 'Sync problem — tap to retry', true);
+    }
+    final waiting = store.state.dirty.length;
+    if (waiting > 0) {
+      return (Icons.cloud_upload_outlined, '$waiting waiting · Sync now', false);
+    }
+    return (Icons.cloud_done_outlined, 'Synced · Sync now', false);
+  }
+
 
   /// Exports whatever the list currently shows (view, tag and search apply).
   Future<void> _exportVisible() {
@@ -328,120 +512,187 @@ class _NotesPageState extends State<NotesPage> {
 
   Widget _buildList(BuildContext context, NoteStore store, bool wide) {
     final cs = Theme.of(context).colorScheme;
-    final tags = store.allTags.toList()..sort();
-    if (_tag != null && !tags.contains(_tag)) _tag = null;
+    final text = Theme.of(context).textTheme;
     final notes = store.query(search: _search, tag: _tag, trash: _trash, view: _view);
+    final noun = _view == NoteView.all || _trash ? 'note' : 'task';
 
-    return Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
-          child: TextField(
-            controller: _searchCtl,
-            onChanged: (v) => setState(() => _search = v),
-            decoration: InputDecoration(
-              isDense: true,
-              filled: true,
-              fillColor: cs.surfaceContainerHigh,
-              hintText: _trash ? 'Search trash' : 'Search notes',
-              prefixIcon: const Icon(Icons.search),
-              suffixIcon: _search.isEmpty
-                  ? null
-                  : IconButton(
-                      icon: const Icon(Icons.close),
-                      onPressed: () => setState(() {
-                        _searchCtl.clear();
-                        _search = '';
-                      }),
-                    ),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(28),
-                borderSide: BorderSide.none,
+    return Container(
+      color: cs.surface,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: EdgeInsets.fromLTRB(wide ? 20 : 4, wide ? 20 : 8, 8, 0),
+            child: Row(
+              children: [
+                if (!wide)
+                  IconButton(
+                    tooltip: 'Menu',
+                    icon: const Icon(Icons.menu),
+                    onPressed: () => _scaffold.currentState?.openDrawer(),
+                  ),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(_heading,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: text.headlineSmall
+                              ?.copyWith(fontWeight: FontWeight.w700)),
+                      Text('${notes.length} $noun${notes.length == 1 ? '' : 's'}',
+                          style: text.bodySmall?.copyWith(color: cs.onSurfaceVariant)),
+                    ],
+                  ),
+                ),
+                if (!wide)
+                  Consumer<SyncService>(
+                    builder: (context, sync, _) {
+                      final (icon, label, err) = _syncInfo(sync, store);
+                      return IconButton(
+                        tooltip: label,
+                        icon: Icon(icon, color: err ? cs.error : null),
+                        onPressed: sync.running ? null : _syncPressed,
+                      );
+                    },
+                  ),
+                if (!_trash)
+                  IconButton(
+                    tooltip: _view == NoteView.all
+                        ? 'Export notes as PDF'
+                        : 'Export tasks as PDF',
+                    icon: const Icon(Icons.picture_as_pdf_outlined),
+                    onPressed: _exportVisible,
+                  ),
+              ],
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
+            child: TextField(
+              controller: _searchCtl,
+              onChanged: (v) => setState(() => _search = v),
+              decoration: InputDecoration(
+                isDense: true,
+                filled: true,
+                fillColor: cs.surfaceContainerHigh,
+                hintText: _trash ? 'Search trash' : 'Search',
+                prefixIcon: const Icon(Icons.search),
+                suffixIcon: _search.isEmpty
+                    ? null
+                    : IconButton(
+                        icon: const Icon(Icons.close),
+                        onPressed: () => setState(() {
+                          _searchCtl.clear();
+                          _search = '';
+                        }),
+                      ),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: BorderSide.none,
+                ),
               ),
             ),
           ),
-        ),
-        if (!_trash)
-          SizedBox(
-            height: 44,
-            child: ListView(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              children: [
-                for (final (v, label) in [
-                  (NoteView.all, 'All'),
-                  (NoteView.tasks, 'Tasks (${store.openTaskCount})'),
-                  (NoteView.today, 'Today (${store.dueTodayCount})'),
-                ])
-                  Padding(
-                    padding: const EdgeInsets.only(right: 8),
-                    child: ChoiceChip(
-                      label: Text(label),
-                      selected: _view == v,
-                      onSelected: (_) => setState(() => _view = v),
-                    ),
+          if (_trash && notes.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 8, 0),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text('Deleted notes stay here until you empty the trash.',
+                        style: text.bodySmall?.copyWith(color: cs.onSurfaceVariant)),
                   ),
-              ],
-            ),
-          ),
-        if (!_trash && tags.isNotEmpty)
-          SizedBox(
-            height: 44,
-            child: ListView(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              children: [
-                for (final t in tags)
-                  Padding(
-                    padding: const EdgeInsets.only(right: 8),
-                    child: FilterChip(
-                      label: Text('#$t'),
-                      selected: _tag == t,
-                      onSelected: (s) => setState(() => _tag = s ? t : null),
-                    ),
+                  TextButton(
+                    onPressed: () => store.emptyTrash(),
+                    child: const Text('Empty trash'),
                   ),
-              ],
+                ],
+              ),
             ),
+          const Divider(height: 1),
+          Expanded(
+            child: notes.isEmpty
+                ? _EmptyList(trash: _trash, searching: _search.isNotEmpty || _tag != null)
+                : ListView.builder(
+                    padding: const EdgeInsets.only(bottom: 120),
+                    itemCount: notes.length,
+                    itemBuilder: (context, i) {
+                      final n = notes[i];
+                      return NoteCard(
+                        note: n,
+                        selected: wide && n.id == _selectedId,
+                        onTap: () => _open(n.id, wide),
+                      );
+                    },
+                  ),
           ),
-        if (_trash && notes.isNotEmpty)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 8, 0),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text('Deleted notes stay here until you empty the trash.',
-                      style: Theme.of(context)
-                          .textTheme
-                          .bodySmall
-                          ?.copyWith(color: cs.onSurfaceVariant)),
-                ),
-                TextButton(
-                  onPressed: () => store.emptyTrash(),
-                  child: const Text('Empty trash'),
-                ),
-              ],
-            ),
-          ),
-        Expanded(
-          child: notes.isEmpty
-              ? _EmptyList(trash: _trash, searching: _search.isNotEmpty || _tag != null)
-              : ListView.builder(
-                  padding: const EdgeInsets.only(bottom: 96, top: 4),
-                  itemCount: notes.length,
-                  itemBuilder: (context, i) {
-                    final n = notes[i];
-                    return NoteCard(
-                      note: n,
-                      selected: wide && n.id == _selectedId,
-                      onTap: () => _open(n.id, wide),
-                    );
-                  },
-                ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }
+
+/// One row of the dark sidebar.
+class _NavItem extends StatelessWidget {
+  const _NavItem({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    this.count = 0,
+    this.selected = false,
+    this.error = false,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+  final int count;
+  final bool selected;
+  final bool error;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = error
+        ? const Color(0xFFFF8A80)
+        : selected
+            ? Colors.white
+            : kOnSidebar;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 1),
+      child: Material(
+        color: selected ? kSidebarSelected : Colors.transparent,
+        borderRadius: BorderRadius.circular(8),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(8),
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            child: Row(
+              children: [
+                Icon(icon, size: 20, color: selected ? kGreenOnDark : color),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                          color: color,
+                          fontSize: 14.5,
+                          fontWeight: selected ? FontWeight.w600 : FontWeight.w400)),
+                ),
+                if (count > 0)
+                  Text('$count',
+                      style: const TextStyle(color: kMutedOnSidebar, fontSize: 12.5)),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 
 class NoteCard extends StatelessWidget {
   const NoteCard({
@@ -469,16 +720,19 @@ class NoteCard extends StatelessWidget {
       }
     }
 
-    return Card(
-      elevation: 0,
-      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-      color: selected ? cs.secondaryContainer : cs.surfaceContainerLow,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-      clipBehavior: Clip.antiAlias,
+    return Material(
+      color: selected ? cs.primaryContainer.withValues(alpha: 0.55) : Colors.transparent,
       child: InkWell(
         onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.all(16),
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
+          decoration: BoxDecoration(
+            border: Border(
+              bottom: BorderSide(color: cs.outlineVariant.withValues(alpha: 0.6)),
+              left: BorderSide(
+                  color: selected ? cs.primary : Colors.transparent, width: 3),
+            ),
+          ),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -587,14 +841,14 @@ class NoteCard extends StatelessWidget {
                 Padding(
                   padding: const EdgeInsets.only(left: 12),
                   child: ClipRRect(
-                    borderRadius: BorderRadius.circular(12),
+                    borderRadius: BorderRadius.circular(4),
                     child: Image.file(
                       File(store.blobFile(thumb.hash).path),
-                      width: 64,
-                      height: 64,
+                      width: 72,
+                      height: 72,
                       fit: BoxFit.cover,
                       cacheWidth: 192,
-                      errorBuilder: (_, __, ___) => const SizedBox(width: 64, height: 64),
+                      errorBuilder: (_, __, ___) => const SizedBox(width: 72, height: 72),
                     ),
                   ),
                 ),

@@ -28,6 +28,7 @@ dependencies:
 
   # image compression, background sync, voice input
   image: ^4.2.0
+  archive: ^4.5.0
   workmanager: ^0.10.10
   speech_to_text: ^7.0.0
 
@@ -45,7 +46,6 @@ dependencies:
   file_picker: ^8.1.2
   pdf: ^3.11.0
   open_filex: ^4.5.0
-  dynamic_color: ^1.7.0
 
 dev_dependencies:
   flutter_test:
@@ -60,3 +60,7 @@ flutter:
     - assets/fonts/NotoSans-Bold.ttf
     - assets/fonts/NotoSans-Italic.ttf
     - assets/fonts/NotoSans-BoldItalic.ttf
+
+# image 4.11 needs a newer archive than pub sometimes picks (decodeLazy).
+dependency_overrides:
+  archive: ^4.5.0

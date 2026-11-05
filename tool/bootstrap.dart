@@ -173,6 +173,7 @@ void _patchAndroid() {
 
   // --- native: hand shared text / files to Flutter -----------------------------
   _patchMainActivity();
+  _patchWidgets();
 
   // --- gradle: compile every plugin against a recent Android API ---------------
   _patchPluginCompileSdk();
@@ -243,6 +244,11 @@ class MainActivity : FlutterActivity() {
                 } else {
                     extract(i) { data -> result.success(data) }
                 }
+            } else if (call.method == "getAction") {
+                result.success(action(intent))
+            } else if (call.method == "refreshWidgets") {
+                InkwellWidgetData.refreshAll(this)
+                result.success(null)
             } else {
                 result.notImplemented()
             }
@@ -255,6 +261,18 @@ class MainActivity : FlutterActivity() {
         if (isShare(intent)) {
             extract(intent) { data -> channel?.invokeMethod("shared", data) }
         }
+        action(intent)?.let { channel?.invokeMethod("action", it) }
+    }
+
+    /** A tap on a home-screen widget: open a note or start a new one. Read once. */
+    private fun action(i: Intent?): Map<String, Any?>? {
+        if (i == null) return null
+        val open = i.getStringExtra("inkwell_open")
+        val fresh = i.getStringExtra("inkwell_new")
+        if (open == null && fresh == null) return null
+        i.removeExtra("inkwell_open")
+        i.removeExtra("inkwell_new")
+        return if (open != null) mapOf("open" to open) else mapOf("new" to fresh)
     }
 
     private fun isShare(i: Intent) =
@@ -306,6 +324,412 @@ class MainActivity : FlutterActivity() {
 ''');
   stdout.writeln('Patched MainActivity.kt for sharing');
 }
+
+/// Adds the Tasks and Notes home-screen widgets: Kotlin providers, a list
+/// service, layouts, colours (light and dark), provider info and manifest
+/// entries. The data comes from shared preferences, written by the Dart side.
+void _patchWidgets() {
+  final main = Directory('android/app/src/main');
+  File? activity;
+  if (main.existsSync()) {
+    for (final e in main.listSync(recursive: true)) {
+      if (e is File && e.path.endsWith('MainActivity.kt')) activity = e;
+    }
+  }
+  if (activity == null) {
+    stderr.writeln('warning: MainActivity.kt not found; widgets not added');
+    return;
+  }
+  final pkg = RegExp(r'^\s*package\s+([\w.]+)', multiLine: true)
+      .firstMatch(activity.readAsStringSync())
+      ?.group(1);
+  if (pkg == null) {
+    stderr.writeln('warning: no package in MainActivity.kt; widgets not added');
+    return;
+  }
+  final sep = Platform.pathSeparator;
+  final kotlinDir = activity.parent.path;
+
+  File('$kotlinDir${sep}InkwellWidgets.kt')
+      .writeAsStringSync(_widgetKotlin.replaceAll('__PKG__', pkg));
+
+  void res(String rel, String body) {
+    final f = File('android/app/src/main/res/$rel'.replaceAll('/', sep));
+    f.parent.createSync(recursive: true);
+    f.writeAsStringSync(body);
+  }
+
+  res('layout/inkwell_widget.xml', _widgetLayout);
+  res('layout/inkwell_widget_item.xml', _widgetItemLayout);
+  res('drawable/inkwell_widget_bg.xml', _widgetBackground);
+  res('values/inkwell_widget_colors.xml', _widgetColors(night: false));
+  res('values-night/inkwell_widget_colors.xml', _widgetColors(night: true));
+  res('xml/inkwell_tasks_widget_info.xml', _widgetInfo);
+  res('xml/inkwell_notes_widget_info.xml', _widgetInfo);
+
+  final manifest = File('android/app/src/main/AndroidManifest.xml');
+  var m = manifest.readAsStringSync();
+  if (!m.contains('inkwell-patched-widgets')) {
+    final decl = '''
+        <!-- inkwell-patched-widgets -->
+        <receiver android:name="$pkg.TasksWidget" android:exported="true"
+            android:label="Inkwell tasks">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE"/>
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider"
+                android:resource="@xml/inkwell_tasks_widget_info"/>
+        </receiver>
+        <receiver android:name="$pkg.NotesWidget" android:exported="true"
+            android:label="Inkwell notes">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE"/>
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider"
+                android:resource="@xml/inkwell_notes_widget_info"/>
+        </receiver>
+        <service android:name="$pkg.InkwellWidgetService" android:exported="false"
+            android:permission="android.permission.BIND_REMOTEVIEWS"/>
+''';
+    if (m.contains('</application>')) {
+      m = m.replaceFirst('</application>', '$decl    </application>');
+      manifest.writeAsStringSync(m);
+      stdout.writeln('Patched AndroidManifest.xml for widgets');
+    } else {
+      stderr.writeln('warning: no </application> in manifest; widgets not added');
+    }
+  }
+  stdout.writeln('Added home-screen widgets');
+}
+
+const String _widgetInfo = '''<?xml version="1.0" encoding="utf-8"?>
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:minWidth="250dp"
+    android:minHeight="180dp"
+    android:updatePeriodMillis="1800000"
+    android:initialLayout="@layout/inkwell_widget"
+    android:resizeMode="horizontal|vertical"
+    android:widgetCategory="home_screen"/>
+''';
+
+const String _widgetBackground = '''<?xml version="1.0" encoding="utf-8"?>
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <solid android:color="@color/inkwell_widget_bg"/>
+    <corners android:radius="20dp"/>
+</shape>
+''';
+
+String _widgetColors({required bool night}) => night
+    ? '''<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="inkwell_widget_bg">#FF1E1B24</color>
+    <color name="inkwell_widget_text">#FFE8E1EC</color>
+    <color name="inkwell_widget_sub">#FFB0A9B5</color>
+    <color name="inkwell_widget_accent">#FFCFBCFF</color>
+</resources>
+'''
+    : '''<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="inkwell_widget_bg">#FFFEF7FF</color>
+    <color name="inkwell_widget_text">#FF1D1B20</color>
+    <color name="inkwell_widget_sub">#FF625B71</color>
+    <color name="inkwell_widget_accent">#FF6750A4</color>
+</resources>
+''';
+
+const String _widgetLayout = '''<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="8dp"
+    android:background="@drawable/inkwell_widget_bg">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
+
+        <TextView
+            android:id="@+id/widget_title"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp"
+            android:paddingTop="6dp"
+            android:paddingBottom="6dp"
+            android:textColor="@color/inkwell_widget_accent"
+            android:textSize="15sp"
+            android:textStyle="bold"
+            android:maxLines="1"
+            android:ellipsize="end"/>
+
+        <TextView
+            android:id="@+id/widget_add"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:gravity="center"
+            android:text="+"
+            android:textColor="@color/inkwell_widget_accent"
+            android:textSize="26sp"/>
+    </LinearLayout>
+
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1">
+
+        <ListView
+            android:id="@+id/widget_list"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:divider="@null"
+            android:dividerHeight="0dp"/>
+
+        <TextView
+            android:id="@+id/widget_empty"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:gravity="center"
+            android:textColor="@color/inkwell_widget_sub"
+            android:textSize="14sp"/>
+    </FrameLayout>
+</LinearLayout>
+''';
+
+const String _widgetItemLayout = '''<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/item_root"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal"
+    android:gravity="center_vertical"
+    android:paddingStart="8dp"
+    android:paddingEnd="8dp"
+    android:paddingTop="7dp"
+    android:paddingBottom="7dp">
+
+    <TextView
+        android:id="@+id/item_dot"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="●"
+        android:textSize="12sp"
+        android:paddingEnd="10dp"/>
+
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:orientation="vertical">
+
+        <TextView
+            android:id="@+id/item_title"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textColor="@color/inkwell_widget_text"
+            android:textSize="15sp"
+            android:maxLines="1"
+            android:ellipsize="end"/>
+
+        <TextView
+            android:id="@+id/item_sub"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textColor="@color/inkwell_widget_sub"
+            android:textSize="12sp"
+            android:maxLines="1"
+            android:ellipsize="end"/>
+    </LinearLayout>
+</LinearLayout>
+''';
+
+const String _widgetKotlin = r'''
+// inkwell-widgets: home-screen widgets for tasks and notes
+package __PKG__
+
+import android.app.PendingIntent
+import android.appwidget.AppWidgetManager
+import android.appwidget.AppWidgetProvider
+import android.content.ComponentName
+import android.content.Context
+import android.content.Intent
+import android.view.View
+import android.widget.RemoteViews
+import android.widget.RemoteViewsService
+import org.json.JSONObject
+
+object InkwellWidgetData {
+    private fun raw(ctx: Context, kind: String): JSONObject? {
+        val prefs = ctx.getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
+        val text = prefs.getString("flutter.inkwell.widget." + kind, null) ?: return null
+        return try {
+            JSONObject(text)
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    fun rows(ctx: Context, kind: String): List<JSONObject> {
+        val arr = raw(ctx, kind)?.optJSONArray("items") ?: return emptyList()
+        val out = ArrayList<JSONObject>()
+        for (i in 0 until arr.length()) {
+            arr.optJSONObject(i)?.let { out.add(it) }
+        }
+        return out
+    }
+
+    fun count(ctx: Context, kind: String): Int = raw(ctx, kind)?.optInt("count", 0) ?: 0
+
+    fun refreshAll(ctx: Context) {
+        val mgr = AppWidgetManager.getInstance(ctx)
+        for (cls in listOf(TasksWidget::class.java, NotesWidget::class.java)) {
+            val ids = mgr.getAppWidgetIds(ComponentName(ctx, cls))
+            if (ids.isEmpty()) continue
+            val i = Intent(ctx, cls)
+            i.action = AppWidgetManager.ACTION_APPWIDGET_UPDATE
+            i.putExtra(AppWidgetManager.EXTRA_APPWIDGET_IDS, ids)
+            ctx.sendBroadcast(i)
+        }
+    }
+}
+
+abstract class InkwellListWidget : AppWidgetProvider() {
+    abstract val kind: String
+    abstract val heading: String
+    abstract val newKind: String
+    abstract val emptyText: String
+
+    override fun onUpdate(ctx: Context, mgr: AppWidgetManager, ids: IntArray) {
+        for (id in ids) {
+            mgr.updateAppWidget(id, build(ctx, id))
+        }
+        mgr.notifyAppWidgetViewDataChanged(ids, R.id.widget_list)
+    }
+
+    private fun build(ctx: Context, id: Int): RemoteViews {
+        val views = RemoteViews(ctx.packageName, R.layout.inkwell_widget)
+        val n = InkwellWidgetData.count(ctx, kind)
+        views.setTextViewText(R.id.widget_title, if (n > 0) heading + " (" + n + ")" else heading)
+        views.setTextViewText(R.id.widget_empty, emptyText)
+
+        val svc = Intent(ctx, InkwellWidgetService::class.java)
+        svc.putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, id)
+        svc.putExtra("kind", kind)
+        svc.setData(android.net.Uri.parse(svc.toUri(Intent.URI_INTENT_SCHEME)))
+        views.setRemoteAdapter(R.id.widget_list, svc)
+        views.setEmptyView(R.id.widget_list, R.id.widget_empty)
+
+        val flags = PendingIntent.FLAG_UPDATE_CURRENT
+        val openApp = Intent(ctx, MainActivity::class.java)
+        openApp.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        views.setOnClickPendingIntent(
+            R.id.widget_title,
+            PendingIntent.getActivity(ctx, 2000 + id, openApp, flags or PendingIntent.FLAG_IMMUTABLE)
+        )
+
+        val add = Intent(ctx, MainActivity::class.java)
+        add.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        add.putExtra("inkwell_new", newKind)
+        views.setOnClickPendingIntent(
+            R.id.widget_add,
+            PendingIntent.getActivity(ctx, 1000 + id, add, flags or PendingIntent.FLAG_IMMUTABLE)
+        )
+
+        // Rows share one template; each row fills in the note id.
+        val template = Intent(ctx, MainActivity::class.java)
+        template.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        views.setPendingIntentTemplate(
+            R.id.widget_list,
+            PendingIntent.getActivity(ctx, 3000 + id, template, flags or PendingIntent.FLAG_MUTABLE)
+        )
+        return views
+    }
+}
+
+class TasksWidget : InkwellListWidget() {
+    override val kind = "tasks"
+    override val heading = "Tasks"
+    override val newKind = "task"
+    override val emptyText = "No open tasks"
+}
+
+class NotesWidget : InkwellListWidget() {
+    override val kind = "notes"
+    override val heading = "Notes"
+    override val newKind = "note"
+    override val emptyText = "No notes yet"
+}
+
+class InkwellWidgetService : RemoteViewsService() {
+    override fun onGetViewFactory(intent: Intent): RemoteViewsFactory =
+        InkwellRowFactory(applicationContext, intent.getStringExtra("kind") ?: "tasks")
+}
+
+class InkwellRowFactory(private val ctx: Context, private val kind: String) :
+    RemoteViewsService.RemoteViewsFactory {
+    private var items: List<JSONObject> = emptyList()
+
+    override fun onCreate() {}
+
+    override fun onDataSetChanged() {
+        items = InkwellWidgetData.rows(ctx, kind)
+    }
+
+    override fun onDestroy() {}
+
+    override fun getCount(): Int = items.size
+
+    override fun getViewAt(position: Int): RemoteViews {
+        val rv = RemoteViews(ctx.packageName, R.layout.inkwell_widget_item)
+        if (position < 0 || position >= items.size) return rv
+        val row = items[position]
+        rv.setTextViewText(R.id.item_title, row.optString("title"))
+
+        val sub = row.optString("sub")
+        if (sub.isEmpty()) {
+            rv.setViewVisibility(R.id.item_sub, View.GONE)
+        } else {
+            rv.setViewVisibility(R.id.item_sub, View.VISIBLE)
+            rv.setTextViewText(R.id.item_sub, sub)
+            val color = if (row.optBoolean("overdue", false)) 0xFFD32F2F.toInt()
+            else ctx.getColor(R.color.inkwell_widget_sub)
+            rv.setTextColor(R.id.item_sub, color)
+        }
+
+        if (kind == "tasks") {
+            val dot = when (row.optInt("prio", 0)) {
+                1 -> 0xFFD32F2F.toInt()
+                2 -> 0xFFF57C00.toInt()
+                3 -> 0xFF1976D2.toInt()
+                else -> 0xFF9E9E9E.toInt()
+            }
+            rv.setViewVisibility(R.id.item_dot, View.VISIBLE)
+            rv.setTextColor(R.id.item_dot, dot)
+        } else if (row.optBoolean("pinned", false)) {
+            rv.setViewVisibility(R.id.item_dot, View.VISIBLE)
+            rv.setTextColor(R.id.item_dot, ctx.getColor(R.color.inkwell_widget_accent))
+        } else {
+            rv.setViewVisibility(R.id.item_dot, View.GONE)
+        }
+
+        val fill = Intent()
+        fill.putExtra("inkwell_open", row.optString("id"))
+        rv.setOnClickFillInIntent(R.id.item_root, fill)
+        return rv
+    }
+
+    override fun getLoadingView(): RemoteViews? = null
+
+    override fun getViewTypeCount(): Int = 1
+
+    override fun getItemId(position: Int): Long = position.toLong()
+
+    override fun hasStableIds(): Boolean = false
+}
+''';
 
 /// Some plugins (file_picker, open_filex, ...) still compile against an old
 /// API level, but androidx.lifecycle now requires 36+. Raise it for every

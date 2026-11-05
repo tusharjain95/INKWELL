@@ -12,6 +12,7 @@ import '../core/store.dart';
 import '../sync/sync_service.dart';
 import '../sync/update_service.dart';
 import 'editor_page.dart';
+import 'export_flow.dart';
 import 'format.dart';
 import 'quick_add.dart';
 import 'task_bar.dart';
@@ -215,6 +216,14 @@ class _NotesPageState extends State<NotesPage> {
               );
             },
           ),
+          if (!_trash)
+            IconButton(
+              tooltip: _view == NoteView.all
+                  ? 'Export notes as PDF'
+                  : 'Export tasks as PDF',
+              icon: const Icon(Icons.picture_as_pdf_outlined),
+              onPressed: _exportVisible,
+            ),
           IconButton(
             tooltip: _trash ? 'Back to notes' : 'Trash',
             icon: Icon(_trash ? Icons.notes : Icons.delete_outline),
@@ -271,6 +280,15 @@ class _NotesPageState extends State<NotesPage> {
             )
           : _buildList(context, store, wide)),
     );
+  }
+
+  /// Exports whatever the list currently shows (view, tag and search apply).
+  Future<void> _exportVisible() {
+    final store = context.read<NoteStore>();
+    final list =
+        store.query(search: _search, tag: _tag, trash: false, view: _view);
+    return exportNotesPdf(context, list,
+        label: _view == NoteView.all ? 'notes' : 'tasks');
   }
 
   /// Windows: drop files onto the window to make a note with them attached.

@@ -33,10 +33,12 @@ class ShareIntake {
     if (!Platform.isAndroid) return;
     _channel.setMethodCallHandler((call) async {
       if (call.method == 'shared') await _handle(call.arguments);
+      if (call.method == 'action') await _action(call.arguments);
       return null;
     });
     try {
       await _handle(await _channel.invokeMethod<Object?>('getInitial'));
+      await _action(await _channel.invokeMethod<Object?>('getAction'));
     } catch (e) {
       debugPrint('Sharing is unavailable: $e');
     }
@@ -45,6 +47,21 @@ class ShareIntake {
   void dispose() {
     openNote.dispose();
     warning.dispose();
+  }
+
+  /// A tap on a home-screen widget: open a note, or start a new note / task.
+  Future<void> _action(Object? data) async {
+    if (data is! Map) return;
+    final open = data['open'];
+    if (open is String && open.isNotEmpty) {
+      if (store.byId(open) != null) openNote.value = open;
+      return;
+    }
+    final kind = data['new'];
+    if (kind == 'note' || kind == 'task') {
+      final n = await store.create(task: kind == 'task');
+      openNote.value = n.id;
+    }
   }
 
   Future<void> _handle(Object? data) async {

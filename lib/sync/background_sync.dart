@@ -8,6 +8,7 @@ import '../core/hub.dart';
 import '../core/reminders.dart';
 import '../core/settings.dart';
 import '../core/store.dart';
+import '../core/widget_sync.dart';
 import 'sync_service.dart';
 import 'worker_guard.dart';
 
@@ -55,6 +56,8 @@ Future<bool> runBackgroundSync() async {
     final reminders = ReminderService(settings);
     await reminders.reschedule(store);
     reminders.dispose();
+    // Widgets redraw on their own schedule; just hand them fresh data.
+    await WidgetSync.push(store, refresh: false);
     store.dispose();
     return true;
   } catch (_) {

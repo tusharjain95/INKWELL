@@ -12,6 +12,7 @@ import '../core/settings.dart';
 import '../core/speech.dart';
 import '../core/store.dart';
 import 'attachment_widgets.dart';
+import 'export_flow.dart';
 import 'format.dart';
 import 'numbered_input.dart';
 import 'task_bar.dart';
@@ -376,6 +377,13 @@ class _EditorPaneState extends State<EditorPane> with WidgetsBindingObserver {
     ));
   }
 
+  Future<void> _exportPdf() async {
+    await _flush();
+    final cur = _store.byId(widget.noteId);
+    if (cur == null || !mounted) return;
+    await exportNotesPdf(context, [cur], label: cur.isTask ? 'task' : 'note');
+  }
+
   Future<void> _removeAttachment(AttachmentRef ref) async {
     await _flush();
     final cur = _store.byId(widget.noteId);
@@ -426,7 +434,14 @@ class _EditorPaneState extends State<EditorPane> with WidgetsBindingObserver {
                   icon: const Icon(Icons.arrow_back),
                   onPressed: () => Navigator.of(context).maybePop(),
                 ),
-              const Spacer(),
+              // Scrolls sideways instead of overflowing on narrow phones.
+              Expanded(
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  reverse: true,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
               IconButton(
                 tooltip: note.pinned ? 'Unpin' : 'Pin',
                 icon: Icon(note.pinned ? Icons.push_pin : Icons.push_pin_outlined),
@@ -449,6 +464,11 @@ class _EditorPaneState extends State<EditorPane> with WidgetsBindingObserver {
                 onPressed: _dictate,
               ),
               IconButton(
+                tooltip: 'Export as PDF',
+                icon: const Icon(Icons.picture_as_pdf_outlined),
+                onPressed: _exportPdf,
+              ),
+              IconButton(
                 tooltip: note.isTask ? 'Turn into a note' : 'Turn into a task',
                 icon: Icon(note.isTask ? Icons.task_alt : Icons.check_circle_outline),
                 onPressed: _toggleTask,
@@ -465,6 +485,10 @@ class _EditorPaneState extends State<EditorPane> with WidgetsBindingObserver {
                   icon: const Icon(Icons.delete_outline),
                   onPressed: _delete,
                 ),
+                    ],
+                  ),
+                ),
+              ),
             ],
           ),
         ),

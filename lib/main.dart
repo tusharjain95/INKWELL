@@ -12,6 +12,7 @@ import 'core/settings.dart';
 import 'core/share_intake.dart';
 import 'core/speech.dart';
 import 'core/store.dart';
+import 'core/widget_sync.dart';
 import 'sync/background_sync.dart';
 import 'sync/sync_service.dart';
 import 'sync/update_service.dart';
@@ -43,6 +44,7 @@ Future<void> main(List<String> args) async {
   final voice = VoiceInput(settings);
   final intake = ShareIntake(store, settings);
   unawaited(intake.start());
+  final widgets = WidgetSync(store)..start();
   final reminders = ReminderService(settings);
   await reminders.init();
   reminders.attach(store);
@@ -68,6 +70,7 @@ Future<void> main(List<String> args) async {
         Provider<WorkerGuard>.value(value: guard),
         Provider<ReminderService>.value(value: reminders),
         Provider<ShareIntake>.value(value: intake),
+        Provider<WidgetSync>.value(value: widgets),
         Provider<UpdateService>(create: (_) => UpdateService()),
       ],
       child: const InkwellApp(),

@@ -105,6 +105,46 @@ describe('telegram webhook', () => {
     assert.match(sent.at(-1).text, /Only text/);
   });
 
+  it('answers /help at once and does not queue it', async () => {
+    for (const t of ['/help', 'help', '?', '/help@InkwellBot']) {
+      await call(telegram, { method: 'POST', headers: tgHeaders, body: update(t) });
+    }
+    assert.equal(hash.size, 0);
+    assert.equal(sent.length, 4);
+    assert.match(sent[0].text, /SAVE/);
+    assert.match(sent[0].text, /snooze 2 fri/);
+  });
+
+  it('/start for the owner includes the help', async () => {
+    await call(telegram, { method: 'POST', headers: tgHeaders, body: update('/start') });
+    assert.match(sent[0].text, /Connected to Inkwell/);
+    assert.match(sent[0].text, /MANAGE/);
+  });
+
+  it('tells you what a bare done or snooze needs, without queueing', async () => {
+    await call(telegram, { method: 'POST', headers: tgHeaders, body: update('/done') });
+    await call(telegram, { method: 'POST', headers: tgHeaders, body: update('snooze') });
+    assert.equal(hash.size, 0);
+    assert.match(sent[0].text, /Which task/);
+    assert.match(sent[1].text, /snooze 2 friday/);
+  });
+
+  it('queues list, done and snooze with a "waiting for the app" reply', async () => {
+    for (const t of ['list', '/list', 'done 2', 'snooze 3 friday']) {
+      await call(telegram, { method: 'POST', headers: tgHeaders, body: update(t) });
+    }
+    assert.equal(hash.size, 4);
+    assert.ok(sent.every((m) => /Inkwell will answer/.test(m.text)));
+  });
+
+  it('ordinary sentences that start with these words are still saved', async () => {
+    for (const t of ['done with the audit', 'list of documents to collect', 'today I met Anil']) {
+      await call(telegram, { method: 'POST', headers: tgHeaders, body: update(t) });
+    }
+    assert.equal(hash.size, 3);
+    assert.ok(sent.every((m) => /Received/.test(m.text)));
+  });
+
   it('accepts a JSON string body', async () => {
     await call(telegram, { method: 'POST', headers: tgHeaders, body: JSON.stringify(update('x y')) });
     assert.equal(hash.size, 1);

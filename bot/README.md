@@ -122,6 +122,21 @@ before", "by", "due date" or "last date" count, plus "within N days" from the
 day the email arrived. If none is found, the task gets a placeholder due date
 a few days out, and says so in its notes.
 
+## Add the command menu (optional)
+
+In Telegram open @BotFather, send `/setcommands`, choose your bot, and paste:
+
+```
+list - Today's tasks
+help - How to use this bot
+done - Tick tasks, e.g. done 2
+snooze - Move a task, e.g. snooze 2 friday
+```
+
+The bot then shows a menu button next to the message box. `/help` and `/start`
+are answered by the bot itself at once. `list`, `done` and `snooze` are
+answered by the Inkwell app, so they take a moment.
+
 ## Using it
 
 | You send | What happens |

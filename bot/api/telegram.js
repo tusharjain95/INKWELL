@@ -1,5 +1,6 @@
 import { telegramOk } from '../lib/auth.js';
 import { jsonBody, telegramSend } from '../lib/http.js';
+import { classify, HELP_TEXT, USAGE } from '../lib/help.js';
 import { push } from '../lib/queue.js';
 
 /**
@@ -22,7 +23,7 @@ export default async function handler(req, res) {
     await telegramSend(
       chatId,
       owner && chatId === owner
-        ? 'Connected to Inkwell. Send a task or note, or reply to a digest with "done 2".'
+        ? `Connected to Inkwell.\n\n${HELP_TEXT}`
         : `Your chat id is ${chatId}. Put it in the TELEGRAM_CHAT_ID setting on Vercel, redeploy, and send /start again.`
     );
     return res.status(200).json({ ok: true });
@@ -36,13 +37,29 @@ export default async function handler(req, res) {
     return res.status(200).json({ ok: true });
   }
 
+  // Help and incomplete commands are answered here, instantly, and never queued.
+  const what = classify(text);
+  if (what.kind === 'help') {
+    await telegramSend(chatId, HELP_TEXT);
+    return res.status(200).json({ ok: true });
+  }
+  if (what.kind === 'usage') {
+    await telegramSend(chatId, USAGE[what.which]);
+    return res.status(200).json({ ok: true });
+  }
+
   try {
     await push({
       kind: 'message',
       text: text.slice(0, 4000),
       forwarded: Boolean(msg.forward_origin || msg.forward_date),
     });
-    await telegramSend(chatId, '📥 Received. It will appear in Inkwell shortly.');
+    await telegramSend(
+      chatId,
+      what.kind === 'command'
+        ? '⏳ Got it. Inkwell will answer here when it next checks (about 2 minutes with the app open).'
+        : '📥 Received. It will appear in Inkwell shortly.'
+    );
   } catch (e) {
     await telegramSend(chatId, `⚠️ Could not save that: ${e.message}`);
   }

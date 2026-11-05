@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'digest.dart';
 import 'image_compress.dart';
 
 /// Where notes are synced to.
@@ -50,18 +51,22 @@ class SyncConfig {
 /// must not depend on any UI.
 class AppSettings extends ChangeNotifier {
   AppSettings._(this._prefs, this._secure, this.config,
-      this._driveToken, this._drivePass);
+      this._driveToken, this._drivePass, this._botKey, this._tgToken);
 
   final SharedPreferences _prefs;
   final FlutterSecureStorage _secure;
   SyncConfig config;
   String _driveToken;
   String _drivePass;
+  String _botKey;
+  String _tgToken;
 
   static const _kToken = 'sync.token';
   static const _kPass = 'sync.passphrase';
   static const _kDriveToken = 'drive.refresh';
   static const _kDrivePass = 'drive.passphrase';
+  static const _kBotKey = 'hub.key';
+  static const _kTgToken = 'hub.token';
 
   // ---- preferences, with defaults -------------------------------------------
 
@@ -138,8 +143,8 @@ class AppSettings extends ChangeNotifier {
       repo: prefs.getString('sync.repo') ?? '',
       branch: prefs.getString('sync.branch') ?? 'main',
     );
-    return AppSettings._(
-        prefs, secure, config, await read(_kDriveToken), await read(_kDrivePass));
+    return AppSettings._(prefs, secure, config, await read(_kDriveToken),
+        await read(_kDrivePass), await read(_kBotKey), await read(_kTgToken));
   }
 
   Future<void> saveSync(SyncConfig c) async {
@@ -202,6 +207,88 @@ class AppSettings extends ChangeNotifier {
   Future<void> setReminderHour(int h) => _set(_prefs.setInt('reminders.hour', h));
   Future<void> setKeepInTray(bool v) => _set(_prefs.setBool('win.tray', v));
   Future<void> setStartWithWindows(bool v) => _set(_prefs.setBool('win.startup', v));
+
+  // ---- Telegram and email hub -------------------------------------------------
+
+  /// Address of the bot on Vercel, e.g. https://inkwell-bot.vercel.app
+  String get botUrl => _prefs.getString('hub.url') ?? '';
+
+  /// Shared secret between the app, the bot and the Gmail script.
+  String get botKey => _botKey;
+
+  /// Telegram bot token and the owner's chat id, for sending messages.
+  String get telegramToken => _tgToken;
+  String get telegramChat => _prefs.getString('hub.chat') ?? '';
+
+  /// This device collects the bot's inbox and sends the digests.
+  bool get hubEnabled => _prefs.getBool('hub.enabled') ?? false;
+
+  bool get hubConfigured =>
+      botUrl.isNotEmpty && _botKey.isNotEmpty && _tgToken.isNotEmpty && telegramChat.isNotEmpty;
+
+  bool get hubReady => hubEnabled && hubConfigured;
+
+  bool get digestEnabled => _prefs.getBool('hub.digest') ?? true;
+  int get digestHour => (_prefs.getInt('hub.digest.hour') ?? 8).clamp(0, 23);
+  bool get nudgeEnabled => _prefs.getBool('hub.nudge') ?? true;
+  int get nudgeHour => (_prefs.getInt('hub.nudge.hour') ?? 17).clamp(0, 23);
+  bool get weeklyEnabled => _prefs.getBool('hub.weekly') ?? true;
+  int get weeklyDay => (_prefs.getInt('hub.weekly.day') ?? DateTime.sunday).clamp(1, 7);
+  int get weeklyHour => (_prefs.getInt('hub.weekly.hour') ?? 18).clamp(0, 23);
+  bool get escalateEnabled => _prefs.getBool('hub.escalate') ?? true;
+
+  bool get quietEnabled => _prefs.getBool('quiet.enabled') ?? false;
+  int get quietStart => (_prefs.getInt('quiet.start') ?? 22).clamp(0, 23);
+  int get quietEnd => (_prefs.getInt('quiet.end') ?? 7).clamp(0, 23);
+
+  /// Quiet hours apply to task reminders and to Telegram messages.
+  QuietHours get quietHours =>
+      QuietHours(enabled: quietEnabled, startHour: quietStart, endHour: quietEnd);
+
+  DigestConfig get digestConfig => DigestConfig(
+        digest: digestEnabled,
+        digestHour: digestHour,
+        nudge: nudgeEnabled,
+        nudgeHour: nudgeHour,
+        weekly: weeklyEnabled,
+        weeklyDay: weeklyDay,
+        weeklyHour: weeklyHour,
+        escalate: escalateEnabled,
+        quiet: quietHours,
+        dayStartHour: reminderHour,
+      );
+
+  Future<void> saveHub({
+    required String url,
+    required String key,
+    required String token,
+    required String chat,
+  }) async {
+    _botKey = key.trim();
+    _tgToken = token.trim();
+    await _secure.write(key: _kBotKey, value: _botKey);
+    await _secure.write(key: _kTgToken, value: _tgToken);
+    await _prefs.setString('hub.url', url.trim().replaceAll(RegExp(r'/+$'), ''));
+    await _prefs.setString('hub.chat', chat.trim());
+    notifyListeners();
+  }
+
+  Future<void> setHubEnabled(bool v) => _set(_prefs.setBool('hub.enabled', v));
+  Future<void> setDigestEnabled(bool v) => _set(_prefs.setBool('hub.digest', v));
+  Future<void> setDigestHour(int h) => _set(_prefs.setInt('hub.digest.hour', h));
+  Future<void> setNudgeEnabled(bool v) => _set(_prefs.setBool('hub.nudge', v));
+  Future<void> setNudgeHour(int h) => _set(_prefs.setInt('hub.nudge.hour', h));
+  Future<void> setWeeklyEnabled(bool v) => _set(_prefs.setBool('hub.weekly', v));
+  Future<void> setWeeklyDay(int d) => _set(_prefs.setInt('hub.weekly.day', d));
+  Future<void> setWeeklyHour(int h) => _set(_prefs.setInt('hub.weekly.hour', h));
+  Future<void> setEscalateEnabled(bool v) => _set(_prefs.setBool('hub.escalate', v));
+  Future<void> setQuietEnabled(bool v) => _set(_prefs.setBool('quiet.enabled', v));
+  Future<void> setQuietStart(int h) => _set(_prefs.setInt('quiet.start', h));
+  Future<void> setQuietEnd(int h) => _set(_prefs.setInt('quiet.end', h));
+
+  /// Re-reads preferences from disk. The Android background worker runs in
+  /// another isolate and may have changed them since this one cached them.
+  Future<void> refresh() => _prefs.reload();
 
   /// Small string/JSON helpers for services that keep their own state.
   String? getString(String key) => _prefs.getString(key);

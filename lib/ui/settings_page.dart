@@ -16,6 +16,7 @@ import '../sync/drive_auth.dart';
 import '../sync/sync_service.dart';
 import '../sync/update_service.dart';
 import 'format.dart';
+import 'hub_settings.dart';
 import 'update_dialog.dart';
 
 class SettingsPage extends StatefulWidget {
@@ -532,6 +533,8 @@ class _SettingsPageState extends State<SettingsPage> {
                     onChanged: settings.autoSync ? settings.setBackgroundSync : null,
                   ),
               ]),
+              _section(context, 'Telegram and email', const [HubSettings()]),
+              _section(context, 'Quiet hours', const [QuietHoursSettings()]),
               if (context.read<ReminderService>().supported)
                 _section(context, 'Task reminders', [
                   SwitchListTile(

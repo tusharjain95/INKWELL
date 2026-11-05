@@ -124,9 +124,12 @@ class ReminderService {
   DateTime? _target(Note n) {
     if (n.deleted || !n.isTask || n.done || n.due == null) return null;
     final d = n.due!;
-    return n.dueHasTime
+    final t = n.dueHasTime
         ? d
         : DateTime(d.year, d.month, d.day, settings.reminderHour);
+    // Quiet hours hold a reminder until they end, except for high-priority
+    // (!1) tasks, which still ring at their due time.
+    return n.priority == 1 ? t : settings.quietHours.shift(t);
   }
 
   static int idFor(String noteId) {

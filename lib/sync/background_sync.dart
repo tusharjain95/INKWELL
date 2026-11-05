@@ -4,6 +4,7 @@ import 'dart:ui' show DartPluginRegistrant;
 
 import 'package:workmanager/workmanager.dart';
 
+import '../core/hub.dart';
 import '../core/reminders.dart';
 import '../core/settings.dart';
 import '../core/store.dart';
@@ -33,20 +34,27 @@ Future<bool> runBackgroundSync() async {
     if (await guard.isAppActive()) return true;
 
     final settings = await AppSettings.load();
-    if (!settings.backgroundSync ||
-        !settings.autoSync ||
-        !settings.syncReady) {
-      return true;
-    }
+    final syncOn =
+        settings.backgroundSync && settings.autoSync && settings.syncReady;
+    final hubOn = settings.hubReady;
+    if (!syncOn && !hubOn) return true;
 
     final store = await NoteStore.open();
-    final sync = SyncService(store, settings, guard: guard);
-    await sync.syncNow(); // takes and releases the shared lock itself
-    // Tasks pulled from another device may need new reminders.
+    // Telegram and email first, so what it adds is uploaded by the sync below.
+    if (hubOn) {
+      final hub = HubService(store, settings);
+      await hub.tick();
+      hub.dispose();
+    }
+    if (syncOn) {
+      final sync = SyncService(store, settings, guard: guard);
+      await sync.syncNow(); // takes and releases the shared lock itself
+      sync.dispose();
+    }
+    // Tasks pulled from another device, or added by the hub, may need reminders.
     final reminders = ReminderService(settings);
     await reminders.reschedule(store);
     reminders.dispose();
-    sync.dispose();
     store.dispose();
     return true;
   } catch (_) {
@@ -67,19 +75,28 @@ class BackgroundSync {
     await Workmanager().initialize(backgroundDispatcher);
   }
 
-  static Future<void> apply({required bool enabled}) async {
+  static int? _minutes;
+
+  /// Registers (or cancels) the periodic worker. With the Telegram hub on it
+  /// runs about every 15 minutes (Android's minimum), otherwise every 30.
+  static Future<void> apply({required bool enabled, bool hub = false}) async {
     if (!supported) return;
+    final minutes = hub ? 15 : 30;
     if (enabled) {
+      if (_minutes == minutes) return; // already registered this way
+      if (_minutes != null) await Workmanager().cancelByUniqueName(_kUnique);
+      _minutes = minutes;
       await Workmanager().registerPeriodicTask(
         _kUnique,
         _kTask,
-        frequency: const Duration(minutes: 30),
+        frequency: Duration(minutes: minutes),
         constraints: Constraints(
           networkType: NetworkType.connected,
           requiresBatteryNotLow: true,
         ),
       );
     } else {
+      _minutes = null;
       await Workmanager().cancelByUniqueName(_kUnique);
     }
   }

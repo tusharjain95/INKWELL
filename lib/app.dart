@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_quill/flutter_quill.dart';
 import 'package:provider/provider.dart';
 
+import 'core/hub.dart';
 import 'core/reminders.dart';
 import 'core/settings.dart';
 import 'core/store.dart';
@@ -27,6 +28,7 @@ class _InkwellAppState extends State<InkwellApp> with WidgetsBindingObserver {
     final sync = context.read<SyncService>();
     final settings = context.read<AppSettings>();
     sync.start();
+    context.read<HubService>().start();
     BackgroundSync.startHeartbeat(context.read<WorkerGuard>());
     _applyBackground();
     settings.addListener(_applyBackground);
@@ -46,7 +48,9 @@ class _InkwellAppState extends State<InkwellApp> with WidgetsBindingObserver {
   void _applyBackground() {
     final s = context.read<AppSettings>();
     BackgroundSync.apply(
-        enabled: s.backgroundSync && s.autoSync && s.syncReady);
+      enabled: (s.backgroundSync && s.autoSync && s.syncReady) || s.hubReady,
+      hub: s.hubReady,
+    );
   }
 
   @override
@@ -67,6 +71,7 @@ class _InkwellAppState extends State<InkwellApp> with WidgetsBindingObserver {
       await store.reload();
       BackgroundSync.startHeartbeat(guard);
       sync.maybeAutoSync();
+      context.read<HubService>().tick();
     } else if (state == AppLifecycleState.paused) {
       // Push before the OS suspends us, then hand over to the worker.
       await sync.maybeAutoSync();

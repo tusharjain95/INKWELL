@@ -191,6 +191,16 @@ browser, and enter the code shown. Use the same passphrase on every device.
 Switching provider re-uploads what exists on this device to the new place;
 attachments not yet downloaded here cannot be re-uploaded.
 
+## Telegram, email screening and digests
+
+Capture tasks from Telegram, turn important emails into tasks, and get a
+morning digest, an evening nudge, a weekly review and escalation of overdue
+`!1` tasks, all on free plans. Setup is in [`bot/README.md`](bot/README.md).
+
+In the app: **Settings → Telegram and email** (turn the hub on for one device
+only) and **Settings → Quiet hours**, which holds reminders and Telegram
+messages overnight. A task marked `!1` still reminds you at its due time.
+
 ## Reminders, sharing, tray and cleanup
 
 **Task reminders.** A task with a due date notifies you when it is due. On
@@ -222,10 +232,12 @@ that a synced note references but the repository lacks, if this device has it.
 ## Project layout
 
 ```
-lib/core/    models, AES-GCM vault, merge rules, store, settings, NL parser, image compression, speech
-lib/sync/    GitHub client, sync engine, Android background sync, release updater
+lib/core/    models, AES-GCM vault, merge rules, store, settings, NL parser, image compression, speech,
+             digest planner, Telegram hub
+lib/sync/    GitHub and Google Drive sync, Android background sync, release updater
 lib/ui/      notes list, editor + attachments, settings, update dialog
-test/        crypto, merge, store, tasks, parser, compression, lock tests
+test/        crypto, merge, store, tasks, parser, compression, lock, digest, hub, drive tests
+bot/         Vercel bot (Telegram webhook, inbox API) and the Gmail Apps Script
 tool/        bootstrap.dart (platform folders + patches)
 installer/   Inno Setup script for the Windows installer
 .github/     CI (analyze + test) and the release workflow

@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import 'app.dart';
+import 'core/hub.dart';
 import 'core/reminders.dart';
 import 'desktop/windows_shell.dart';
 import 'core/settings.dart';
@@ -38,6 +39,7 @@ Future<void> main(List<String> args) async {
   final store = await NoteStore.open();
   final settings = await AppSettings.load();
   final sync = SyncService(store, settings, guard: guard);
+  final hub = HubService(store, settings);
   final voice = VoiceInput(settings);
   final intake = ShareIntake(store, settings);
   unawaited(intake.start());
@@ -61,6 +63,7 @@ Future<void> main(List<String> args) async {
         ChangeNotifierProvider<NoteStore>.value(value: store),
         ChangeNotifierProvider<AppSettings>.value(value: settings),
         ChangeNotifierProvider<SyncService>.value(value: sync),
+        ChangeNotifierProvider<HubService>.value(value: hub),
         ChangeNotifierProvider<VoiceInput>.value(value: voice),
         Provider<WorkerGuard>.value(value: guard),
         Provider<ReminderService>.value(value: reminders),

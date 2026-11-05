@@ -191,6 +191,16 @@ browser, and enter the code shown. Use the same passphrase on every device.
 Switching provider re-uploads what exists on this device to the new place;
 attachments not yet downloaded here cannot be re-uploaded.
 
+## Easy setup
+
+Settings has a guided flow for each feature: Telegram (paste the BotFather
+token, tap Find my chat, test), GitHub sync (Create token, Create the repository
+for me, Generate a strong passphrase), a Health check that says what works,
+and Set up another device (a PIN-encrypted text code that copies sync and
+Telegram settings to a new phone or PC). Telegram no longer needs a server:
+the app reads the bot's messages itself. Moving from an older version:
+see MIGRATION.md.
+
 ## Telegram, email screening and digests
 
 Capture tasks from Telegram, turn important emails into tasks, and get a

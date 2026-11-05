@@ -1,3 +1,5 @@
+> **Note:** Telegram messages are now read directly by the app, so this server is only needed for **email screening**. If you do not use Gmail screening you can delete the Vercel project and Upstash database.
+
 # Inkwell bot: Telegram, email screening and digests
 
 Everything here runs on free plans: Telegram, Vercel Hobby, Upstash Redis and

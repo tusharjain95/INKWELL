@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../core/hub.dart';
 import '../core/settings.dart';
@@ -112,6 +113,88 @@ class _HubSettingsState extends State<HubSettings> {
     }
   }
 
+  String? _botName;
+
+  Future<void> _open(String url) async {
+    try {
+      await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+    } catch (_) {}
+  }
+
+  /// Step 1: checks the token with Telegram and learns the bot's name.
+  Future<void> _checkToken() async {
+    final token = _token.text.trim();
+    if (token.isEmpty) {
+      setState(() {
+        _ok = false;
+        _result = 'Paste the token from @BotFather first.';
+      });
+      return;
+    }
+    setState(() {
+      _busy = true;
+      _result = null;
+    });
+    try {
+      final name = await TelegramApi(token).getMe();
+      if (!mounted) return;
+      setState(() {
+        _botName = name;
+        _ok = true;
+        _result = 'Token works: @$name. Now open the bot, press Start and send "hi", '
+            'then tap "Find my chat".';
+      });
+    } on HubException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _botName = null;
+        _ok = false;
+        _result = e.message;
+      });
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  /// Step 2: reads the bot's recent messages to find your chat id.
+  Future<void> _findChat() async {
+    final settings = context.read<AppSettings>();
+    setState(() {
+      _busy = true;
+      _result = null;
+    });
+    try {
+      final latest = await TelegramApi(_token.text.trim()).latestChat();
+      if (!mounted) return;
+      if (latest == null) {
+        setState(() {
+          _ok = false;
+          _result = 'No message found yet. Open your bot in Telegram, press Start, '
+              'send "hi", then tap this again.';
+        });
+        return;
+      }
+      _chat.text = latest.chatId;
+      await _save();
+      // Mark that message as read so it does not become a note.
+      await settings.putString('hub.tg.offset', '${latest.updateId}');
+      if (!mounted) return;
+      setState(() {
+        _ok = true;
+        _result = 'Found your chat${latest.chatName.isEmpty ? '' : ' (${latest.chatName})'}. '
+            'Now tap "Save and test".';
+      });
+    } on HubException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _ok = false;
+        _result = e.message;
+      });
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final s = context.watch<AppSettings>();
@@ -123,75 +206,118 @@ class _HubSettingsState extends State<HubSettings> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'Send tasks and notes to Inkwell from Telegram, turn important emails '
-          'into tasks, and get a morning digest, an evening nudge, a weekly '
-          'review and escalation of overdue high-priority tasks. See '
-          'bot/README.md for the one-time setup (free).',
+          'Send tasks and notes to Inkwell from Telegram and get a morning digest, '
+          'an evening nudge, a weekly review and escalation of overdue '
+          'high-priority tasks. No server needed: the app talks to Telegram itself.',
           style: text.bodyMedium?.copyWith(color: cs.onSurfaceVariant),
         ),
-        const SizedBox(height: 12),
-        TextField(
-          controller: _url,
-          keyboardType: TextInputType.url,
-          autocorrect: false,
-          decoration: const InputDecoration(
-            labelText: 'Bot address',
-            hintText: 'https://your-project.vercel.app',
+        const SizedBox(height: 16),
+        Text('1. Create your bot', style: text.titleSmall),
+        const SizedBox(height: 4),
+        Text('In Telegram, open @BotFather, send /newbot, pick a name, and copy the token it gives you.',
+            style: muted),
+        const SizedBox(height: 8),
+        Wrap(spacing: 8, runSpacing: 8, children: [
+          OutlinedButton.icon(
+            onPressed: () => _open('https://t.me/BotFather'),
+            icon: const Icon(Icons.open_in_new, size: 18),
+            label: const Text('Open BotFather'),
           ),
-        ),
-        const SizedBox(height: 12),
-        TextField(
-          controller: _key,
-          obscureText: !_showKey,
-          autocorrect: false,
-          decoration: InputDecoration(
-            labelText: 'Inkwell key',
-            helperText: 'The INKWELL_KEY value from Vercel.',
-            suffixIcon: IconButton(
-              icon: Icon(_showKey ? Icons.visibility_off : Icons.visibility),
-              onPressed: () => setState(() => _showKey = !_showKey),
-            ),
-          ),
-        ),
+        ]),
         const SizedBox(height: 12),
         TextField(
           controller: _token,
           obscureText: !_showToken,
           autocorrect: false,
+          enableSuggestions: false,
           decoration: InputDecoration(
-            labelText: 'Telegram bot token',
-            helperText: 'From @BotFather. Stays on this device.',
+            labelText: 'Bot token',
+            helperText: 'Stays on this device.',
             suffixIcon: IconButton(
               icon: Icon(_showToken ? Icons.visibility_off : Icons.visibility),
               onPressed: () => setState(() => _showToken = !_showToken),
             ),
           ),
         ),
+        const SizedBox(height: 8),
+        FilledButton.tonalIcon(
+          onPressed: _busy ? null : _checkToken,
+          icon: const Icon(Icons.verified_outlined),
+          label: const Text('Check token'),
+        ),
+        const SizedBox(height: 20),
+        Text('2. Connect your chat', style: text.titleSmall),
+        const SizedBox(height: 4),
+        Text('Open your bot, press Start and send "hi". Then tap Find my chat.',
+            style: muted),
+        const SizedBox(height: 8),
+        Wrap(spacing: 8, runSpacing: 8, children: [
+          if (_botName != null)
+            OutlinedButton.icon(
+              onPressed: () => _open('https://t.me/$_botName'),
+              icon: const Icon(Icons.open_in_new, size: 18),
+              label: Text('Open @$_botName'),
+            ),
+          FilledButton.tonalIcon(
+            onPressed: _busy ? null : _findChat,
+            icon: const Icon(Icons.person_search_outlined),
+            label: const Text('Find my chat'),
+          ),
+        ]),
         const SizedBox(height: 12),
         TextField(
           controller: _chat,
           keyboardType: TextInputType.number,
           decoration: const InputDecoration(
-            labelText: 'Your Telegram chat id',
-            helperText: 'Send /start to your bot and it tells you.',
+            labelText: 'Your chat id',
+            helperText: 'Filled in for you by Find my chat.',
           ),
         ),
-        const SizedBox(height: 12),
-        Wrap(
-          spacing: 12,
-          runSpacing: 8,
-          children: [
-            FilledButton.tonalIcon(
-              onPressed: _busy ? null : _test,
-              icon: const Icon(Icons.network_check),
-              label: Text(_busy ? 'Testing…' : 'Save and test'),
-            ),
-          ],
+        const SizedBox(height: 20),
+        Text('3. Test it', style: text.titleSmall),
+        const SizedBox(height: 8),
+        FilledButton.icon(
+          onPressed: _busy ? null : _test,
+          icon: const Icon(Icons.network_check),
+          label: Text(_busy ? 'Working…' : 'Save and test'),
         ),
         if (_result != null) ...[
           const SizedBox(height: 12),
           _Result(text: _result!, ok: _ok),
         ],
+        const SizedBox(height: 8),
+        ExpansionTile(
+          tilePadding: EdgeInsets.zero,
+          childrenPadding: const EdgeInsets.only(bottom: 8),
+          title: Text('Advanced: email screening relay', style: text.titleSmall),
+          subtitle: Text('Optional. Only needed to turn important emails into tasks.',
+              style: muted),
+          children: [
+            TextField(
+              controller: _url,
+              keyboardType: TextInputType.url,
+              autocorrect: false,
+              decoration: const InputDecoration(
+                labelText: 'Relay address',
+                hintText: 'https://your-project.vercel.app',
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _key,
+              obscureText: !_showKey,
+              autocorrect: false,
+              decoration: InputDecoration(
+                labelText: 'Inkwell key',
+                helperText: 'The INKWELL_KEY value from Vercel.',
+                suffixIcon: IconButton(
+                  icon: Icon(_showKey ? Icons.visibility_off : Icons.visibility),
+                  onPressed: () => setState(() => _showKey = !_showKey),
+                ),
+              ),
+            ),
+          ],
+        ),
         const Divider(height: 32),
         SwitchListTile(
           contentPadding: EdgeInsets.zero,
@@ -213,7 +339,7 @@ class _HubSettingsState extends State<HubSettings> {
             final when = hub.lastRun;
             final line = hub.lastError ??
                 (when == null
-                    ? (s.hubConfigured ? 'Waiting for the first check…' : 'Fill in the four fields above.')
+                    ? (s.hubConfigured ? 'Waiting for the first check…' : 'Finish steps 1 to 3 above.')
                     : 'Last check ${fmtWhen(when.toUtc())} · ${hub.lastMessage ?? 'done'}');
             return Padding(
               padding: const EdgeInsets.only(bottom: 4),

@@ -10,6 +10,118 @@ class HubException implements Exception {
   String toString() => message;
 }
 
+
+/// A message the owner sent to the bot, read straight from Telegram.
+class TgUpdate {
+  const TgUpdate(this.updateId, this.chatId, this.text, {this.chatName = ''});
+  final int updateId;
+  final String chatId;
+  final String text;
+  final String chatName;
+}
+
+/// Talks to Telegram with a bot token: checks the token, finds the owner's
+/// chat id and reads incoming messages (no server needed).
+class TelegramApi {
+  TelegramApi(this.token, {http.Client? client}) : _http = client ?? http.Client();
+
+  final String token;
+  final http.Client _http;
+
+  Future<Map<String, dynamic>> _call(String method, [Map<String, dynamic>? body]) async {
+    http.Response r;
+    try {
+      r = await _http
+          .post(
+            Uri.https('api.telegram.org', '/bot${token.trim()}/$method'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode(body ?? const {}),
+          )
+          .timeout(const Duration(seconds: 25));
+    } on TimeoutException {
+      throw HubException('Telegram did not answer in time.');
+    } catch (e) {
+      throw HubException('Could not reach Telegram: $e');
+    }
+    Map<String, dynamic> j;
+    try {
+      j = jsonDecode(r.body) as Map<String, dynamic>;
+    } catch (_) {
+      throw HubException('Telegram sent an unexpected reply (${r.statusCode}).');
+    }
+    if (j['ok'] != true) {
+      final code = (j['error_code'] as num?)?.toInt() ?? r.statusCode;
+      if (code == 401 || code == 404) {
+        throw HubException('Telegram rejected the bot token. Copy it again from @BotFather.');
+      }
+      if (code == 409) throw _WebhookActive();
+      throw HubException('Telegram: ${j['description'] ?? 'error $code'}');
+    }
+    return j;
+  }
+
+  /// The bot's @username. Throws [HubException] if the token is wrong.
+  Future<String> getMe() async {
+    final j = await _call('getMe');
+    final res = (j['result'] as Map).cast<String, dynamic>();
+    return (res['username'] as String?) ?? 'your bot';
+  }
+
+  Future<void> deleteWebhook() => _call('deleteWebhook', {'drop_pending_updates': false});
+
+  /// Messages after [offset] (pass lastUpdateId + 1). If an old webhook is
+  /// still set, it is removed first and the call retried once.
+  Future<List<TgUpdate>> getUpdates({int offset = 0}) async {
+    Map<String, dynamic> j;
+    try {
+      j = await _call('getUpdates', {
+        if (offset > 0) 'offset': offset,
+        'timeout': 0,
+        'limit': 100,
+        'allowed_updates': ['message'],
+      });
+    } on _WebhookActive {
+      await deleteWebhook();
+      j = await _call('getUpdates', {
+        if (offset > 0) 'offset': offset,
+        'timeout': 0,
+        'limit': 100,
+        'allowed_updates': ['message'],
+      });
+    }
+    return parseUpdates(j);
+  }
+
+  /// The chat that most recently messaged the bot (private chats only).
+  Future<TgUpdate?> latestChat() async {
+    final all = await getUpdates();
+    return all.isEmpty ? null : all.last;
+  }
+
+  /// Pure parser, kept separate so it can be tested.
+  static List<TgUpdate> parseUpdates(Map<String, dynamic> j) {
+    final out = <TgUpdate>[];
+    for (final u in (j['result'] as List? ?? const [])) {
+      if (u is! Map) continue;
+      final id = (u['update_id'] as num?)?.toInt();
+      final m = u['message'];
+      if (id == null || m is! Map) continue;
+      final chat = m['chat'];
+      if (chat is! Map || chat['type'] != 'private') continue;
+      final text = (m['text'] as String?) ?? (m['caption'] as String?) ?? '';
+      final first = (chat['first_name'] as String?) ?? '';
+      final user = (chat['username'] as String?) ?? '';
+      out.add(TgUpdate(id, '${chat['id']}', text,
+          chatName: first.isNotEmpty ? first : user));
+    }
+    return out;
+  }
+}
+
+class _WebhookActive extends HubException {
+  _WebhookActive() : super('A webhook is set on this bot.');
+}
+
 /// Sends messages to the owner's Telegram chat with the bot token stored on
 /// this device. (The bot server never needs to know what a digest says.)
 class TelegramClient {

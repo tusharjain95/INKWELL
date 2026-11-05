@@ -223,8 +223,11 @@ class AppSettings extends ChangeNotifier {
   /// This device collects the bot's inbox and sends the digests.
   bool get hubEnabled => _prefs.getBool('hub.enabled') ?? false;
 
-  bool get hubConfigured =>
-      botUrl.isNotEmpty && _botKey.isNotEmpty && _tgToken.isNotEmpty && telegramChat.isNotEmpty;
+  /// Telegram works straight from the app: a bot token and chat id are enough.
+  bool get hubConfigured => _tgToken.isNotEmpty && telegramChat.isNotEmpty;
+
+  /// The optional email relay (a small Vercel bot). Telegram does not need it.
+  bool get botConfigured => botUrl.isNotEmpty && _botKey.isNotEmpty;
 
   bool get hubReady => hubEnabled && hubConfigured;
 

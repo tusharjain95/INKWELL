@@ -13,10 +13,13 @@ import '../core/speech.dart';
 import '../core/store.dart';
 import '../sync/background_sync.dart';
 import '../sync/drive_auth.dart';
+import '../sync/github_setup.dart';
 import '../sync/sync_service.dart';
 import '../sync/update_service.dart';
 import 'format.dart';
 import 'hub_settings.dart';
+import 'health_check.dart';
+import 'setup_transfer.dart';
 import 'update_dialog.dart';
 
 class SettingsPage extends StatefulWidget {
@@ -73,6 +76,42 @@ class _SettingsPageState extends State<SettingsPage> {
         branch: _branch.text.trim().isEmpty ? 'main' : _branch.text.trim(),
         passphrase: _pass.text,
       );
+
+  bool _repoBusy = false;
+
+  /// Makes a private "inkwell-sync" repository with the pasted token.
+  Future<void> _createRepo() async {
+    final token = _token.text.trim();
+    if (token.isEmpty) {
+      setState(() {
+        _resultOk = false;
+        _result = 'Paste your GitHub token first (use "Create token" to get one).';
+      });
+      return;
+    }
+    setState(() {
+      _repoBusy = true;
+      _result = null;
+    });
+    try {
+      final name = await GitHubSetup(token).createPrivateRepo();
+      if (!mounted) return;
+      setState(() {
+        _repo.text = name;
+        if (_branch.text.trim().isEmpty) _branch.text = 'main';
+        _resultOk = true;
+        _result = 'Using $name (private). Now choose a passphrase and tap Save & connect.';
+      });
+    } on RepoSetupException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _resultOk = false;
+        _result = e.message;
+      });
+    } finally {
+      if (mounted) setState(() => _repoBusy = false);
+    }
+  }
 
   Future<void> _connect() async {
     final cfg = _cfg();
@@ -351,6 +390,24 @@ class _SettingsPageState extends State<SettingsPage> {
                   ),
                 ),
                 const SizedBox(height: 12),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 4,
+                  children: [
+                    TextButton.icon(
+                      onPressed: () => launchUrl(Uri.parse(GitHubSetup.tokenUrl),
+                          mode: LaunchMode.externalApplication),
+                      icon: const Icon(Icons.open_in_new, size: 18),
+                      label: const Text('Create token on GitHub'),
+                    ),
+                    TextButton.icon(
+                      onPressed: _repoBusy ? null : _createRepo,
+                      icon: const Icon(Icons.create_new_folder_outlined, size: 18),
+                      label: Text(_repoBusy ? 'Creating…' : 'Create the repository for me'),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
                 TextField(
                   controller: _pass,
                   obscureText: !_showPass,
@@ -365,6 +422,17 @@ class _SettingsPageState extends State<SettingsPage> {
                       icon: Icon(_showPass ? Icons.visibility_off : Icons.visibility),
                       onPressed: () => setState(() => _showPass = !_showPass),
                     ),
+                  ),
+                ),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton.icon(
+                    onPressed: () => setState(() {
+                      _pass.text = GitHubSetup.generatePassphrase();
+                      _showPass = true;
+                    }),
+                    icon: const Icon(Icons.casino_outlined, size: 18),
+                    label: const Text('Generate a strong passphrase (save it!)'),
                   ),
                 ),
                 const SizedBox(height: 16),
@@ -533,6 +601,8 @@ class _SettingsPageState extends State<SettingsPage> {
                     onChanged: settings.autoSync ? settings.setBackgroundSync : null,
                   ),
               ]),
+              _section(context, 'Set up another device', const [SetupTransfer()]),
+              _section(context, 'Health check', const [HealthCheck()]),
               _section(context, 'Telegram and email', const [HubSettings()]),
               _section(context, 'Quiet hours', const [QuietHoursSettings()]),
               if (context.read<ReminderService>().supported)

@@ -225,6 +225,7 @@ class HubService extends ChangeNotifier {
 
   static const String _kState = 'hub.state';
   static const String _kSeen = 'hub.seen';
+  static const String _kOffset = 'hub.tg.offset';
 
   void start() {
     _timer?.cancel();
@@ -240,6 +241,7 @@ class HubService extends ChangeNotifier {
 
   TelegramClient _telegram() => TelegramClient(
       token: settings.telegramToken, chatId: settings.telegramChat, client: _client);
+  TelegramApi _api() => TelegramApi(settings.telegramToken, client: _client);
   BotInbox _bot() =>
       BotInbox(baseUrl: settings.botUrl, key: settings.botKey, client: _client);
 
@@ -259,14 +261,23 @@ class HubService extends ChangeNotifier {
 
   /// Checks the connection and sends a hello. Throws [HubException] with the reason.
   Future<String> test() async {
-    final items = await _bot().fetch();
-    final ok = await _telegram().send('Inkwell is connected ✓ (${items.length} waiting)');
-    if (!ok) {
-      throw HubException('The bot is reachable, but Telegram refused the message. '
-          'Check the bot token and chat id, and send /start to your bot once.');
+    final name = await _api().getMe();
+    var waiting = 0;
+    String relay = '';
+    if (settings.botConfigured) {
+      try {
+        waiting = (await _bot().fetch()).length;
+        relay = ' Email relay reachable ($waiting waiting).';
+      } on HubException catch (e) {
+        relay = ' Email relay: ${e.message}';
+      }
     }
-    return 'Connected. ${items.length} item${items.length == 1 ? '' : 's'} waiting. '
-        'A confirmation was sent to your Telegram.';
+    final ok = await _telegram().send('Inkwell is connected ✓');
+    if (!ok) {
+      throw HubException('@$name is a valid bot, but Telegram refused the message. '
+          'Open the bot in Telegram, press Start, then try again.');
+    }
+    return 'Connected to @$name. A confirmation was sent to your Telegram.$relay';
   }
 
   /// One round: collect the inbox, then send whatever is due.
@@ -290,9 +301,31 @@ class HubService extends ChangeNotifier {
       );
 
       var handled = 0;
-      final items = await _bot().fetch();
-      if (items.isNotEmpty) {
-        final seen = _loadSeen();
+      final seen = _loadSeen();
+
+      // 1. Messages sent to the bot, read straight from Telegram.
+      final lastOffset = int.tryParse(settings.getString(_kOffset) ?? '') ?? 0;
+      final updates = await _api().getUpdates(offset: lastOffset > 0 ? lastOffset + 1 : 0);
+      var maxId = lastOffset;
+      for (final u in updates) {
+        if (u.updateId > maxId) maxId = u.updateId;
+        // Only the owner's chat may add things.
+        if (u.chatId != settings.telegramChat.trim() || u.text.trim().isEmpty) continue;
+        final id = 'tg${u.updateId}';
+        if (seen.contains(id)) continue;
+        try {
+          await handler.handle(InboxItem(id: id, kind: 'message', text: u.text));
+          handled++;
+        } catch (e) {
+          await tg.send('⚠️ I could not save that: $e');
+        }
+        seen.add(id);
+      }
+      if (maxId > lastOffset) await settings.putString(_kOffset, '$maxId');
+
+      // 2. Screened email (and anything still queued on an old bot).
+      if (settings.botConfigured) {
+        final items = await _bot().fetch();
         final toAck = <String>[];
         for (final it in items) {
           if (!seen.contains(it.id)) {
@@ -310,6 +343,10 @@ class HubService extends ChangeNotifier {
         state.lastList = handler.lastList;
         await settings.putString(_kState, state.toJson());
         await _bot().ack(toAck);
+      } else {
+        await _saveSeen(seen);
+        state.lastList = handler.lastList;
+        await settings.putString(_kState, state.toJson());
       }
 
       final plan = planHubMessages(
